@@ -1,4 +1,4 @@
-# Init Project
+# 理享派
 
 基于 Nuxt 4 + Prisma + PostgreSQL 的全栈用户认证与管理系统。
 

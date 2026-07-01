@@ -8,6 +8,12 @@ export default defineNuxtConfig({
     '@sidebase/nuxt-auth',
   ],
 
+  elementPlus: {
+    defaultLocale: 'zh-cn',
+  },
+
+  css: ['~/assets/css/main.css'],
+
   auth: {
     baseURL: process.env.AUTH_ORIGIN,
     provider: {

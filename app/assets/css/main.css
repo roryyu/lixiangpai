@@ -1,0 +1,144 @@
+/* 绿色主题补充样式 */
+
+/* 按钮样式修正 */
+.el-button--primary {
+  background-color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+.el-button--primary:hover {
+  background-color: var(--el-color-primary-light-3);
+  border-color: var(--el-color-primary-light-3);
+}
+
+.el-button--primary:active {
+  background-color: var(--el-color-primary-dark-2);
+  border-color: var(--el-color-primary-dark-2);
+}
+
+/* 链接 */
+.el-link--primary {
+  color: var(--el-color-primary);
+}
+
+.el-link--primary:hover {
+  color: var(--el-color-primary-light-3);
+}
+
+/* 复选框 */
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  background-color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+/* 单选框 */
+.el-radio__input.is-checked .el-radio__inner {
+  border-color: var(--el-color-primary);
+  background-color: var(--el-color-primary);
+}
+
+.el-radio__input.is-checked+.el-radio__label {
+  color: var(--el-color-primary);
+}
+
+/* 开关 */
+.el-switch.is-checked .el-switch__core {
+  background-color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+/* 表格高亮 */
+.el-table__body tr.current-row>td.el-table__cell {
+  background-color: var(--el-color-primary-light-9);
+}
+
+/* 分页 */
+.el-pagination.is-background .el-pager li:not(.is-disabled).is-active {
+  background-color: var(--el-color-primary);
+}
+
+.el-pager li.is-active {
+  color: white;
+  background-color: var(--el-color-primary);
+}
+
+/* 标签页 */
+.el-tabs__item.is-active {
+  color: var(--el-color-primary);
+}
+
+.el-tabs__active-bar {
+  background-color: var(--el-color-primary);
+}
+
+/* 步骤条 */
+.el-step__head.is-process,
+.el-step__head.is-finish {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+.el-step__title.is-process,
+.el-step__title.is-finish {
+  color: var(--el-color-primary);
+}
+
+/* 选择器 */
+.el-select-dropdown__item.selected {
+  color: var(--el-color-primary);
+}
+
+.el-select .el-select__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-select .el-select__wrapper.is-hovering {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-select-dropdown__item.is-selected {
+  color: var(--el-color-primary);
+}
+
+/* 表单输入框 */
+.el-input.is-focus .el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-input .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-input .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-textarea.is-focus .el-textarea__inner {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+/* 标签 */
+.el-tag--primary {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-8);
+  color: var(--el-color-primary);
+}
+
+.el-tag--primary.is-dark {
+  background-color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+/* 页面全局背景 */
+html, body {
+  background-color: #f8fafc;
+}

@@ -14,7 +14,7 @@ async function handleLogout() {
     <el-header class="layout-header">
       <div class="header-left">
         <NuxtLink to="/" class="logo">
-          Init Project
+          理享派
         </NuxtLink>
       </div>
       <div class="header-right">
@@ -55,7 +55,7 @@ async function handleLogout() {
 .logo {
   font-size: 18px;
   font-weight: 700;
-  color: #409eff;
+  color: #1da14dff;
   text-decoration: none;
 }
 

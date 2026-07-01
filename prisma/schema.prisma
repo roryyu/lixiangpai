@@ -18,6 +18,8 @@ model User {
 
   passwordResets PasswordReset[]
   aiConversations AIConversation[]
+  histories      History[]
+  records        Record[]
 }
 
 model PasswordReset {
@@ -41,6 +43,7 @@ model PromptSetting {
   id        String   @id @default(uuid())
   module    String?
   prompt    String?
+  info      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -70,4 +73,29 @@ model File {
   ossUrl    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model History {
+  id        String   @id @default(uuid())
+  name      String?
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  records Record[]
+}
+
+model Record {
+  id        String   @id @default(uuid())
+  key       String?
+  value     String?
+  type      String?
+  historyId String
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  history History @relation(fields: [historyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -30,8 +30,14 @@ export function getTokenFromHeader(event: any): string | null {
   return authHeader.slice(7)
 }
 
+export function getTokenFromCookie(event: any): string | null {
+  const cookies = parseCookies(event)
+  // @sidebase/nuxt-auth default cookie names
+  return cookies['auth.token'] || cookies['auth:token'] || cookies['nuxt-auth-token'] || cookies['nuxt-auth:session'] || null
+}
+
 export function getUserFromToken(event: any): { userId: string; email: string } | null {
-  const token = getTokenFromHeader(event)
+  const token = getTokenFromHeader(event) || getTokenFromCookie(event)
   if (!token) return null
   return verifyToken(token)
 }
