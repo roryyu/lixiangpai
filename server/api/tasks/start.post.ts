@@ -226,7 +226,7 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
     await consoleLog('设计分析完成...')
     // 用uploadToOSSAndSaveRecord上传图纸
     await consoleLog('清理缓存...')
-    await uploadToOSSAndSaveRecord(imagePath)
+    const imageUrl = await uploadToOSSAndSaveRecord(imagePath)
 
     // 完成
     await prisma.task.update({
@@ -235,6 +235,10 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
         status: 'COMPLETED',
         progress: 100,
         message: logs.join('\n\r'),
+        inputData: JSON.stringify({
+          "userRequirement": userRequirement,
+          "imageUrl":imageUrl.ossUrl
+        }),
         outputData: JSON.stringify(result.result),
         completedAt: new Date(),
       },

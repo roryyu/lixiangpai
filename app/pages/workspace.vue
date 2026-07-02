@@ -246,6 +246,52 @@ const renderMarkdown = (text: string | undefined) => {
   return marked(text, { breaks: true, gfm: true })
 }
 
+// 点击历史任务，加载任务详情
+async function loadTaskDetail(taskId: string) {
+  try {
+    const res = await $fetch(`/api/tasks/${taskId}`) as any
+    const task = res.task
+    currentTask.value = task
+
+    // 清空之前的对话
+    chatMessages.value = []
+
+    // 渲染用户消息：inputData 的 userRequirement 和 imageUrl
+    const inputData = task.inputData || {}
+    const userMessage = {
+      id: Date.now().toString() + '_user',
+      type: 'user',
+      content: inputData.userRequirement || task.name || '上传图片进行识别',
+      files: inputData.imageUrl ? [{
+        name: '上传图片',
+        size: 0,
+        url: inputData.imageUrl,
+      }] : [],
+      timestamp: task.createdAt,
+    }
+    chatMessages.value.push(userMessage)
+
+    // 渲染 AI 回复：outputData
+    const aiMessage = {
+      id: Date.now().toString() + '_ai',
+      type: 'ai',
+      taskId: task.id,
+      status: task.status,
+      progress: task.status === 'COMPLETED' ? 100 : 0,
+      message: task.message || '',
+      response: task.outputData,
+      resultData: task.outputData,
+      error: task.errorMsg,
+      timestamp: task.updatedAt,
+    }
+    chatMessages.value.push(aiMessage)
+
+  } catch (error) {
+    console.error('加载任务详情失败:', error)
+    ElMessage.error('加载任务详情失败')
+  }
+}
+
 // 删除任务
 async function deleteTask(taskId: string) {
   try {
@@ -261,6 +307,12 @@ async function deleteTask(taskId: string) {
 
     ElMessage.success('删除成功')
     
+    // 如果删除的是当前查看的任务，清空对话
+    if (currentTask.value?.id === taskId) {
+      chatMessages.value = []
+      currentTask.value = null
+    }
+
     // 刷新历史记录
     await loadHistories()
   } catch (error: any) {
@@ -302,7 +354,8 @@ onMounted(() => {
             <div
               v-for="item in histories"
               :key="item.id"
-              class="history-item"
+              :class="['history-item', { active: currentTask?.id === item.id }]"
+              @click="loadTaskDetail(item.id)"
             >
               <div class="history-header-row">
                 <div class="history-name">{{ item.name || '未命名对话' }}</div>
@@ -352,11 +405,11 @@ onMounted(() => {
                       <div v-if="msg.files && msg.files.length > 0" class="file-info">
                         <div v-for="(file, idx) in msg.files" :key="idx" class="file-item">
                           <el-image
-                            v-if="file.base64"
-                            :src="file.base64"
+                            v-if="file.base64 || file.url"
+                            :src="file.base64 || file.url"
                             class="preview-image-small"
                             fit="cover"
-                            :preview-src-list="[file.base64]"
+                            :preview-src-list="[file.base64 || file.url]"
                             :preview-teleported="true"
                           >
                             <template #error>
@@ -366,7 +419,7 @@ onMounted(() => {
                               </div>
                             </template>
                           </el-image>
-                          <span>{{ file.name }} ({{ formatFileSize(file.size) }})</span>
+                          <span>{{ file.name }}{{ file.size > 0 ? ' (' + formatFileSize(file.size) + ')' : '' }}</span>
                         </div>
                       </div>
                     </div>
@@ -634,6 +687,11 @@ onMounted(() => {
 
 .history-item:hover {
   background: #f0f9ff;
+}
+
+.history-item.active {
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
 }
 
 .history-header-row {

@@ -730,11 +730,11 @@ export async function recognizeImage(imagePath: string, options: RecognitionOpti
 
     // Step 3: Qwen-VL 视觉识别
     await consoleLog('[3/4] 大模型 视觉识别...')
-    const visionResult = await visionStep(preprocessResult.preprocessedPath, ocrResult,consoleLog)
+    //const visionResult = await visionStep(preprocessResult.preprocessedPath, ocrResult,consoleLog)
     //console.log('@@@@@visionResult',JSON.stringify(visionResult))
-    //Step 4: 后处理与结构化
+    //Step 4: 后处理与结构化testData
     await consoleLog('[4/4] 后处理与结构化...')
-    const finalResult = await postprocessStep(ocrResult, visionResult, preprocessResult.metadata,consoleLog)
+    const finalResult = await postprocessStep(ocrResult, testData, preprocessResult.metadata,consoleLog)
     
     // 保存结果
     //const resultPath = path.join(outputDir, `${baseName}.result.json`)
