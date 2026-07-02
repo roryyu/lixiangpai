@@ -5,33 +5,28 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.join(__dirname, '..', '.env') })
 
-import { PrismaClient } from '@prisma/client'
-import { PrismaPg } from '@prisma/adapter-pg'
-import pg from 'pg'
-import bcryptjs from 'bcryptjs'
-
-const { Pool } = pg
-
-// 从 DATABASE_URL 解析 schema
+import { PrismaClient } from "../app/generated/prisma"
+import { PrismaPg } from "@prisma/adapter-pg"
 function getSchemaFromUrl(url: string | undefined): string {
   if (!url) return 'public'
-  const match = url.match(/schema=([^&]+)/)
+  const match = url.match(/[?&]schema=([^&]+)/)
   return match ? match[1] : 'public'
 }
 
 const schema = getSchemaFromUrl(process.env.DATABASE_URL)
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  options: `-c search_path=${schema}`,
-})
-const connectionString = process.env.DATABASE_URL!
-const adapter = new PrismaPg(connectionString, { schema })
-const prisma = new PrismaClient({ adapter })
-
+const prismaClientSingleton = () => {
+  const connectionString = process.env.DATABASE_URL!
+  const adapter = new PrismaPg(connectionString, { schema })
+  return new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  })
+}
+const prisma = prismaClientSingleton()
+import bcryptjs from 'bcryptjs'
 async function main() {
   // 如果不是 public schema，直接用带 schema 的原始 SQL
-  if (schema !== 'public') {
+  
     // 检查是否存在
     const result = await prisma.$queryRawUnsafe(
       `SELECT * FROM "${schema}"."User" WHERE email = $1`,
@@ -56,33 +51,6 @@ async function main() {
 
     console.log('Admin 账号创建成功: admin@admin.com')
     return
-  }
-
-  // public schema 用正常方式
-  const adminEmail = 'admin@admin.com'
-  const adminPassword = 'admin123'
-
-  const existingAdmin = await prisma.user.findUnique({
-    where: { email: adminEmail },
-  })
-
-  if (existingAdmin) {
-    console.log('Admin 账号已存在')
-    return
-  }
-
-  const hashedPassword = await bcryptjs.hash(adminPassword, 12)
-
-  const admin = await prisma.user.create({
-    data: {
-      email: adminEmail,
-      password: hashedPassword,
-      name: 'Admin',
-      role: 'ADMIN',
-    },
-  })
-
-  console.log(`Admin 账号创建成功: ${admin.email}`)
 }
 
 main()

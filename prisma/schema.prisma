@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
 }
 
 datasource db {
@@ -20,6 +21,7 @@ model User {
   aiConversations AIConversation[]
   histories      History[]
   records        Record[]
+  tasks          Task[]
 }
 
 model PasswordReset {
@@ -98,4 +100,29 @@ model Record {
 
   history History @relation(fields: [historyId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model Task {
+  id          String     @id @default(uuid())
+  userId      String
+  name        String?
+  status      TaskStatus @default(PENDING)
+  message     String?
+  progress    Int        @default(0)
+  inputData   String?    // JSON 格式的输入数据
+  outputData  String?    // JSON 格式的输出数据
+  errorMsg    String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -1,0 +1,80 @@
+{
+  "_meta": {
+    "model": "qwen-vl-max",
+    "mode": "single",
+    "processedAt": "2026-07-02T03:11:06.568Z",
+    "imageWidth": 1024,
+    "imageHeight": 1024,
+    "originalWidth": 1024,
+    "originalHeight": 1024,
+    "tileCount": 1,
+    "totalTokens": 0
+  },
+  "_quality": {
+    "confidenceStats": {
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    },
+    "ocrCoverage": "N/A%",
+    "ocrTotalWords": 0,
+    "ocrVerifiedWords": 0,
+    "ocrFallbackDims": 0,
+    "downgradedElements": 0,
+    "dimensionChecks": [
+      {
+        "value": "3000",
+        "valid": true,
+        "note": ""
+      },
+      {
+        "value": "4500",
+        "valid": true,
+        "note": ""
+      }
+    ],
+    "issues": []
+  },
+  "drawing_info": {
+    "title": "CAD 设计稿识别结果",
+    "type": "建筑图纸",
+    "unit": "mm"
+  },
+  "elements": [
+    {
+      "type": "wall",
+      "description": "主要墙体结构",
+      "position": "四周",
+      "properties": {
+        "thickness": "200mm",
+        "material": "混凝土"
+      },
+      "confidence": "high"
+    }
+  ],
+  "spaces": [
+    {
+      "name": "客厅",
+      "position": "中心区域",
+      "function": "会客、娱乐",
+      "estimated_area": "13.50㎡ (基于尺寸 3000×4500 计算)",
+      "_calculated_area": "13.50㎡"
+    }
+  ],
+  "dimensions": [
+    {
+      "value": "3000",
+      "target": "客厅宽度",
+      "position": "水平标注"
+    },
+    {
+      "value": "4500",
+      "target": "客厅长度",
+      "position": "垂直标注"
+    }
+  ],
+  "annotations": [],
+  "ocr_verified": [],
+  "ocr_unverified": [],
+  "summary": "识别完成：包含主要墙体结构和客厅区域"
+}

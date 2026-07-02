@@ -40,7 +40,7 @@ const initParticles = (canvas: HTMLCanvasElement) => {
       targetX: centerX + Math.cos(angle) * radius,
       targetY: centerY + Math.sin(angle) * radius,
       radius: 2 + Math.random() * 2,
-      color: `rgba(34, 197, 94, ${0.6 + Math.random() * 0.4})`
+      color: `rgba(22, 101, 52, ${0.7 + Math.random() * 0.3})`
     })
   }
   
@@ -89,7 +89,7 @@ const drawConnections = (ctx: CanvasRenderingContext2D, particles: Particle[]) =
       if (distance < maxDistance) {
         const opacity = (1 - distance / maxDistance) * 0.6
         ctx.beginPath()
-        ctx.strokeStyle = `rgba(34, 197, 94, ${opacity})`
+        ctx.strokeStyle = `rgba(22, 101, 52, ${opacity})`
         ctx.lineWidth = 1
         ctx.moveTo(particles[i].x, particles[i].y)
         ctx.lineTo(particles[j].x, particles[j].y)
@@ -115,8 +115,7 @@ const animate = () => {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   
-  ctx.fillStyle = '#0a0a0a'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
   
   particles.value.forEach(p => updateParticle(p, canvas))
   drawConnections(ctx, particles.value)
@@ -202,7 +201,35 @@ const navigateToWorkspace = () => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #0a0a0a;
+  background: linear-gradient(to top, #d6f7e0, #ffffff);
+}
+
+.homepage::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 19px,
+    rgba(156, 163, 175, 0.15) 19px,
+    rgba(156, 163, 175, 0.15) 20px
+  );
+  animation: fadeInOut 4s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes fadeInOut {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 
 .background-canvas {
@@ -211,6 +238,7 @@ const navigateToWorkspace = () => {
   left: 0;
   width: 100%;
   height: 100%;
+  z-index: 0;
 }
 
 .content-overlay {
@@ -222,12 +250,12 @@ const navigateToWorkspace = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  z-index: 20;
 }
 
 .hero-section {
   text-align: center;
-  color: white;
+  color: #1f2937;
   max-width: 600px;
   padding: 40px;
 }
@@ -246,7 +274,7 @@ const navigateToWorkspace = () => {
 .subtitle {
   font-size: 24px;
   margin: 0 0 16px 0;
-  color: #86efac;
+  color: #0f6930;
   font-weight: 300;
   letter-spacing: 4px;
 }
@@ -254,7 +282,7 @@ const navigateToWorkspace = () => {
 .description {
   font-size: 16px;
   margin: 0 0 40px 0;
-  color: #9ca3af;
+  color: #6b7280;
   line-height: 1.8;
 }
 
