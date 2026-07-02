@@ -16,8 +16,9 @@ export interface VisionResult {
 /**
  * Step 3: Qwen-VL 视觉识别
  */
-export async function visionStep(imagePath: string, ocrResult: OcrResult): Promise<VisionResult> {
-  console.log('[3/4] Qwen-VL-Max 视觉识别...')
+export async function visionStep(imagePath: string, ocrResult: OcrResult,consoleLog: (msg: string) => void): Promise<VisionResult> {
+  
+
 
   if (!config.dashscopeApiKey) {
     console.log('  ⚠ DASHSCOPE_API_KEY 未配置，返回模拟结果')
@@ -25,15 +26,16 @@ export async function visionStep(imagePath: string, ocrResult: OcrResult): Promi
   }
 
   const client = createQwenClient()
+  const step=await visionStepTiled(client, imagePath, ocrResult,consoleLog)
 
   // 根据配置选择识别策略
-  if (config.tile.enabled) {
-    return await visionStepTiled(client, imagePath, ocrResult)
-  } else if (config.twoPass.enabled) {
-    return await visionStepTwoPass(client, imagePath, ocrResult)
-  } else {
-    return await visionStepSingle(client, imagePath, ocrResult)
-  }
+  //if (config.tile.enabled) {
+    return await visionStepTwoPass(client, imagePath, ocrResult, step.rawText, consoleLog)
+  //} else if (config.twoPass.enabled) {
+    //return await visionStepTwoPass(client, imagePath, ocrResult)
+  //} else {
+    //return await visionStepSingle(client, imagePath, ocrResult)
+  //}
 }
 
 /**
@@ -68,28 +70,30 @@ async function visionStepSingle(
 async function visionStepTwoPass(
   client: ReturnType<typeof createQwenClient>,
   imagePath: string,
-  ocrResult: OcrResult
+  ocrResult: OcrResult,
+  stepResult:string,
+  consoleLog: (msg: string) => void
 ): Promise<VisionResult> {
-  console.log('  模式: 两轮精化')
+  consoleLog('- 模式: 两轮精化')
 
   const { data, mediaType } = await imageToBase64(imagePath)
 
   // 第一轮：粗识别
-  console.log('  [3.1] 第一轮粗识别...')
+  consoleLog('  - 第一轮粗识别...')
   const pass1 = await callQwenVL(client, data, mediaType, buildRoughPrompt(), { temperature: 0.2 })
   const roughResult = parseQwenJson(pass1.rawText) || {}
-  console.log(`  ✓ 第一轮完成，token: ${pass1.usage?.total_tokens || '?'}`)
+  consoleLog(`  - ✓ 第一轮完成，token: ${pass1.usage?.total_tokens || '?'}`)
 
   await sleep(300)
 
   // 第二轮：精识别（带第一轮上下文）
-  console.log('  [3.2] 第二轮精化识别...')
-  const refinePrompt = buildRefinePrompt(ocrResult, roughResult)
+  consoleLog('  - 第二轮精化识别...')
+  const refinePrompt = buildRefinePrompt(ocrResult, roughResult+"\n\r"+stepResult)
   const pass2 = await callQwenVL(client, data, mediaType, refinePrompt)
   const parsed = parseQwenJson(pass2.rawText)
 
   const totalTokens = (pass1.usage?.total_tokens || 0) + (pass2.usage?.total_tokens || 0)
-  console.log(`  ✓ 第二轮完成，总 token: ${totalTokens}`)
+  consoleLog(`  - ✓ 第二轮完成，总 token: ${totalTokens}`)
 
   return {
     result: parsed || { raw: pass2.rawText },
@@ -106,18 +110,19 @@ async function visionStepTwoPass(
 async function visionStepTiled(
   client: ReturnType<typeof createQwenClient>,
   imagePath: string,
-  ocrResult: OcrResult
+  ocrResult: OcrResult,
+  consoleLog: (msg: string) => void
 ): Promise<VisionResult> {
-  console.log(`  模式: 分块识别 (${config.tile.size}px, 重叠${config.tile.overlap})`)
+  consoleLog(`- 模式: 分块识别 (${config.tile.size}px, 重叠${config.tile.overlap})`)
 
   const tiles = await splitImage(imagePath, config.tile.size, config.tile.overlap)
-  console.log(`  分为 ${tiles.length} 块`)
+  consoleLog(`  - 分为 ${tiles.length} 块`)
 
   const tileResults = []
 
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i]
-    console.log(`  [3.${i + 1}/${tiles.length}] 识别第 ${i + 1} 块 (${tile.width}x${tile.height})...`)
+    consoleLog(`    - 识别第 ${i + 1} 块 (${tile.width}x${tile.height})...`)
 
     // 提取该块区域内的 OCR 文字
     const localOcr = filterOcrByRegion(ocrResult, tile)
@@ -144,7 +149,7 @@ async function visionStepTiled(
   const merged = mergeTileResults(tileResults)
   const totalTokens = tileResults.reduce((sum, r) => sum + (r.usage?.total_tokens || 0), 0)
 
-  console.log(`  ✓ 全部完成，总 token: ${totalTokens}`)
+  consoleLog(`    - ✓ 全部完成，总 token: ${totalTokens}`)
 
   return {
     result: merged,

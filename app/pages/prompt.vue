@@ -155,11 +155,6 @@ onMounted(() => {
     <el-table :data="prompts" v-loading="loading" stripe style="width: 100%">
       <el-table-column prop="module" label="模块" width="200" />
       <el-table-column prop="info" label="说明" width="200" />
-      <el-table-column prop="prompt" label="提示词" min-width="300">
-        <template #default="{ row }">
-          <div class="markdown-preview" v-html="renderMarkdown(row.prompt || '')"></div>
-        </template>
-      </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" width="180">
         <template #default="{ row }">
           {{ new Date(row.createdAt).toLocaleString() }}

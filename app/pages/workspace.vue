@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Upload, CircleClose, Promotion, Search, Picture, Check, Close } from '@element-plus/icons-vue'
+import { Upload, CircleClose, Promotion, Picture, Check, Close, Delete } from '@element-plus/icons-vue'
+import { marked } from 'marked'
+import { ref, watch, nextTick } from 'vue'
 
 definePageMeta({
   middleware: 'auth',
@@ -17,6 +19,25 @@ const currentTask = ref<any>(null)
 const isPolling = ref(false)
 const chatMessages = ref<any[]>([])
 const isSending = ref(false)
+
+// 自动滚动 markdown 内容到底部
+async function scrollMarkdownToBottom() {
+  // await nextTick()
+  // const markdownElements = document.querySelectorAll('.markdown-content-preview')
+  // markdownElements.forEach((el) => {
+  //   const htmlEl = el as HTMLElement
+  //   htmlEl.scrollTop = htmlEl.scrollHeight
+  // })
+}
+
+// 监听消息内容变化，自动滚动到底部
+watch(
+  () => chatMessages.value.map((m) => m.message),
+  () => {
+    scrollMarkdownToBottom()
+  },
+  { deep: true }
+)
 
 // File 转 Base64
 function fileToBase64(file: File): Promise<string> {
@@ -51,7 +72,7 @@ function handleFileUpload(event: Event) {
   const input = event.target as HTMLInputElement
   const files = input.files
   if (!files) return
-  const maxFiles=9;
+  const maxFiles=1;
   const remainingSlots = maxFiles - uploadedFiles.value.length
   const filesToAdd = Array.from(files).slice(0, remainingSlots)
 
@@ -60,6 +81,9 @@ function handleFileUpload(event: Event) {
     const url = URL.createObjectURL(file)
     previewUrls.value.push(url)
   })
+
+  // 清空 input value，允许下次选择相同文件
+  input.value = ''
 }
 
 function removeFile(index: number) {
@@ -72,7 +96,7 @@ function removeFile(index: number) {
 async function pollTaskStatus(taskId: string) {
   isPolling.value = true
   let pollCount = 0
-  const maxPolls = 60 // 最多轮询60次
+  const maxPolls = 600 // 最多轮询60次
 
   while (isPolling.value && pollCount < maxPolls) {
     try {
@@ -83,10 +107,14 @@ async function pollTaskStatus(taskId: string) {
       const taskMsg = chatMessages.value.find((m: any) => m.taskId === taskId)
       if (taskMsg) {
         taskMsg.status = res.task.status
-        taskMsg.progress = res.task.progress
+        taskMsg.progress = Math.round(pollCount/maxPolls*100)
         taskMsg.message = res.task.message
 
+        // 滚动到底部
+        scrollMarkdownToBottom()
+
         if (res.task.status === 'COMPLETED') {
+          taskMsg.progress=100
           taskMsg.response = res.task.outputData
           taskMsg.resultData = res.task.outputData
           isPolling.value = false
@@ -105,11 +133,14 @@ async function pollTaskStatus(taskId: string) {
         isPolling.value = false
         break
       }
+      console.log('轮询次数:', pollCount,'res.task',res.task.status)
     } catch (error) {
       console.error('轮询任务状态失败:', error)
     }
 
     pollCount++
+    
+    // 每2秒轮询一次
     await new Promise(resolve => setTimeout(resolve, 2000)) // 每2秒轮询一次
   }
 
@@ -121,6 +152,9 @@ async function sendMessage() {
   if (uploadedFiles.value.length === 0) {
     return
   }
+
+  // TODO:清空之前的对话内容
+  chatMessages.value = []
 
   isSending.value = true
 
@@ -206,6 +240,37 @@ function formatFileSize(bytes: number) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
+// 渲染 Markdown
+const renderMarkdown = (text: string | undefined) => {
+  if (!text) return ''
+  return marked(text, { breaks: true, gfm: true })
+}
+
+// 删除任务
+async function deleteTask(taskId: string) {
+  try {
+    await ElMessageBox.confirm('确定要删除该任务吗？删除后无法恢复。', '删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+
+    await $fetch(`/api/tasks/${taskId}`, {
+      method: 'DELETE',
+    })
+
+    ElMessage.success('删除成功')
+    
+    // 刷新历史记录
+    await loadHistories()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('删除任务失败:', error)
+      ElMessage.error('删除失败，请重试')
+    }
+  }
+}
+
 onMounted(() => {
   loadHistories()
 })
@@ -239,7 +304,19 @@ onMounted(() => {
               :key="item.id"
               class="history-item"
             >
-              <div class="history-name">{{ item.name || '未命名对话' }}</div>
+              <div class="history-header-row">
+                <div class="history-name">{{ item.name || '未命名对话' }}</div>
+                <el-button
+                  type="danger"
+                  size="small"
+                  circle
+                  plain
+                  class="delete-btn"
+                  @click.stop="deleteTask(item.id)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+              </div>
               <div class="history-status">
                 <el-tag :type="item.status === 'COMPLETED' ? 'success' : item.status === 'FAILED' ? 'danger' : 'warning'" size="small">
                   {{ item.status === 'COMPLETED' ? '已完成' : item.status === 'FAILED' ? '失败' : item.status === 'RUNNING' ? '处理中' : '等待中' }}
@@ -293,6 +370,7 @@ onMounted(() => {
                         </div>
                       </div>
                     </div>
+                    <div class="clear"></div>
                   </div>
 
                   <!-- AI 消息 -->
@@ -302,7 +380,10 @@ onMounted(() => {
                       <!-- 加载中状态 -->
                       <div v-if="msg.status === 'PENDING' || msg.status === 'RUNNING'" class="loading-state">
                         <el-icon class="is-loading loading-icon"><Promotion /></el-icon>
-                        <span class="status-text">{{ msg.message }}</span>
+                        <div
+                          v-html="renderMarkdown(msg.message)"
+                          class="markdown-content markdown-content-preview"
+                        ></div>
                         <el-progress
                           :percentage="msg.progress || 0"
                           :show-text="false"
@@ -400,7 +481,11 @@ onMounted(() => {
                         <!-- 摘要 -->
                         <div v-if="msg.resultData.summary" class="result-section">
                           <h4>📝 摘要</h4>
-                          <p class="summary-text">{{ msg.resultData.summary }}</p>
+                          <div v-html="renderMarkdown(msg.resultData.summary)" class="markdown-content summary-text"></div>
+                        </div>
+                        <!-- 建议 -->
+                        <div v-if="msg.resultData.suggestion" class="result-section">
+                          <div v-html="renderMarkdown(msg.resultData.suggestion)" class="markdown-content summary-text"></div>
                         </div>
                       </div>
 
@@ -410,6 +495,7 @@ onMounted(() => {
                         <span class="error-text">{{ msg.error || '识别失败' }}</span>
                       </div>
                     </div>
+                    <div class="clear"></div>
                   </div>
 
                   <!-- 错误消息 -->
@@ -452,17 +538,14 @@ onMounted(() => {
                     <input
                       type="file"
                       accept="image/*"
-                      multiple
                       class="file-input"
                       @change="handleFileUpload"
                     />
                   </label>
                   <el-button
                     type="success"
-                    circle
                     class="send-btn"
                     :disabled="uploadedFiles.length === 0 || isSending"
-                    :loading="isSending"
                     @click="sendMessage"
                   >
                     <el-icon><Promotion /></el-icon>
@@ -553,6 +636,13 @@ onMounted(() => {
   background: #f0f9ff;
 }
 
+.history-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .history-name {
   font-size: 14px;
   color: #303133;
@@ -560,6 +650,23 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+
+.delete-btn {
+  opacity: 0;
+  transition: opacity 0.2s;
+  padding: 4px;
+  width: 24px;
+  height: 24px;
+}
+
+.history-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  background: #fef0f0;
 }
 
 .history-status {
@@ -629,30 +736,33 @@ onMounted(() => {
 }
 
 .messages-list {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+
 }
 
 .message-item {
-  display: flex;
   width: 100%;
 }
 
 .message-item.user {
-  justify-content: flex-end;
+  padding-bottom: 20px;
 }
 
 .message-item.ai {
-  justify-content: flex-start;
+  padding-bottom: 20px;
+}
+
+.user-message {
+  
 }
 
 .user-message .message-content {
+  float:right;
   background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
   color: #fff;
   padding: 16px 20px;
   border-radius: 16px 16px 4px 16px;
   max-width: 70%;
+  text-align: left;
 }
 
 .ai-message {
@@ -1058,5 +1168,136 @@ onMounted(() => {
 
 .send-btn .el-icon {
   font-size: 18px;
+}
+
+/* Markdown 样式 */
+:deep(.markdown-content) {
+  line-height: 1.6;
+  color: #303133;
+}
+
+:deep(.markdown-content h1),
+:deep(.markdown-content h2),
+:deep(.markdown-content h3),
+:deep(.markdown-content h4),
+:deep(.markdown-content h5),
+:deep(.markdown-content h6) {
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+:deep(.markdown-content h1) {
+  font-size: 24px;
+  border-bottom: 1px solid #e4e7ed;
+  padding-bottom: 8px;
+}
+
+:deep(.markdown-content h2) {
+  font-size: 20px;
+  border-bottom: 1px solid #e4e7ed;
+  padding-bottom: 6px;
+}
+
+:deep(.markdown-content h3) {
+  font-size: 18px;
+}
+
+:deep(.markdown-content h4) {
+  font-size: 16px;
+}
+
+:deep(.markdown-content p) {
+  margin: 8px 0;
+}
+
+:deep(.markdown-content ul),
+:deep(.markdown-content ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+:deep(.markdown-content li) {
+  margin: 4px 0;
+}
+
+:deep(.markdown-content code) {
+  background: #f5f7fa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  color: #e6a23c;
+}
+
+:deep(.markdown-content pre) {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+:deep(.markdown-content pre code) {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+:deep(.markdown-content blockquote) {
+  border-left: 4px solid #22c55e;
+  padding-left: 12px;
+  margin: 12px 0;
+  color: #606266;
+  background: #f0f9ff;
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+}
+
+:deep(.markdown-content a) {
+  color: #409eff;
+  text-decoration: none;
+}
+
+:deep(.markdown-content a:hover) {
+  text-decoration: underline;
+}
+
+:deep(.markdown-content table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+
+:deep(.markdown-content th),
+:deep(.markdown-content td) {
+  border: 1px solid #e4e7ed;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+:deep(.markdown-content th) {
+  background: #f5f7fa;
+  font-weight: 600;
+}
+
+:deep(.markdown-content hr) {
+  border: none;
+  border-top: 1px solid #e4e7ed;
+  margin: 16px 0;
+}
+
+:deep(.markdown-content img) {
+  max-width: 100%;
+  border-radius: 4px;
+}
+.clear{
+  clear: both;
+}
+.markdown-content-preview *{
+  font-size: 12px;
+  line-height: 1.2;
+  color: #3c3d3e;
 }
 </style>

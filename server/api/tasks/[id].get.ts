@@ -36,7 +36,7 @@ export default defineEventHandler(async (event) => {
       message: '无权访问此任务',
     })
   }
-
+  //console.log(task)
   return {
     success: true,
     task: {

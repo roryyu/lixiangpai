@@ -123,9 +123,14 @@ export async function uploadToOSSAndSaveRecord(
       ossUrl,
     },
   })
-  
+  console.log('baseName',baseName)
   // 删除本地暂存文件
   deleteFile(filePath)
+  //删除RESULT_DIR下相关的文件binary，enhanced，preprocessed文件
+  console.log(path.join(RESULT_DIR, `${baseName}.binary${ext}`))
+  console.log(path.join(RESULT_DIR, `${baseName}.enhanced${ext}`))
+  console.log(path.join(RESULT_DIR, `${baseName}.preprocessed${ext}`))
+
   
   return fileRecord
 }

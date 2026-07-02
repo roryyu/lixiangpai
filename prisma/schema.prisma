@@ -19,7 +19,6 @@ model User {
 
   passwordResets PasswordReset[]
   aiConversations AIConversation[]
-  histories      History[]
   records        Record[]
   tasks          Task[]
 }
@@ -77,29 +76,18 @@ model File {
   updatedAt DateTime @updatedAt
 }
 
-model History {
-  id        String   @id @default(uuid())
-  name      String?
-  userId    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  records Record[]
-}
-
 model Record {
   id        String   @id @default(uuid())
   key       String?
   value     String?
   type      String?
-  historyId String
+  taskId    String
   userId    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  history History @relation(fields: [historyId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 enum TaskStatus {
@@ -124,5 +112,6 @@ model Task {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  records Record[]
 }

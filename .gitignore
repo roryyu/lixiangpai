@@ -9,7 +9,8 @@ dist
 .vscode
 # Node dependencies
 node_modules
-
+uploads
+results
 # Logs
 logs
 *.log

@@ -1,162 +1,290 @@
 import { config } from './config'
-import { imageToBase64, splitImage } from './image'
-import type { OcrResult } from './ocr'
+import OpenAI from 'openai';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-// 简化：直接使用 fetch 调用 OpenAI 兼容接口
-export function createQwenClient() {
-  return {
-    apiKey: config.dashscopeApiKey,
-    baseUrl: config.dashscopeBaseUrl,
+
+/**
+ * 创建 Qwen-VL 客户端（OpenAI 兼容模式）
+ */
+export function createQwenClient(): OpenAI {
+  if (!config.dashscopeApiKey) {
+    throw new Error('DASHSCOPE_API_KEY 未配置，请在 .env 中设置');
   }
+
+  return new OpenAI({
+    apiKey: config.dashscopeApiKey,
+    baseURL: config.dashscopeBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  });
+}
+
+interface QwenCallOverrides {
+  temperature?: number;
+  maxTokens?: number;
+}
+
+interface QwenResponse {
+  rawText: string;
+  usage: OpenAI.CompletionUsage | undefined;
 }
 
 /**
- * 调用 Qwen-VL 模型
+ * 调用 Qwen-VL API（简化的 OpenAI 兼容格式）
  */
 export async function callQwenVL(
-  client: ReturnType<typeof createQwenClient>,
+  client: OpenAI,
   imageBase64: string,
   mediaType: string,
-  prompt: string,
-  options: { temperature?: number } = {}
-) {
-  if (!client.apiKey) {
-    throw new Error('DASHSCOPE_API_KEY 未配置')
-  }
+  promptText: string,
+  overrides: QwenCallOverrides = {}
+): Promise<QwenResponse> {
+  const temperature = overrides.temperature ?? config.qwen.temperature;
+  const maxTokens = overrides.maxTokens ?? config.qwen.maxTokens;
 
-  const response = await fetch(`${client.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${client.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.qwen.model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: `data:${mediaType};base64,${imageBase64}` } },
-          ],
-        },
-      ],
-      temperature: options.temperature ?? config.qwen.temperature,
-      max_tokens: config.qwen.maxTokens,
-    }),
-  })
+  // MaaS 平台兼容的消息格式：不使用嵌套的 image_url 对象
+  // https://www.alibabacloud.com/help/en/model-studio/vision#c01e63074ae0
+  // https://www.alibabacloud.com/help/en/model-studio/visual-reasoning?spm=a2c63.p38356.help-menu-2400256.d_0_3_1_2.3aa25a5beYPE28
+  //console.log(`- 调用 Qwen-VL 模型 ${config.qwen.model}，prompt: ${promptText}`)
+  const response = await client.chat.completions.create({
+    model: config.qwen.model,
+    messages: [
+      {
+        role: 'system',
+        content: '你是一位专业的室内工程师，擅长室内空间规划、柜体设计和精确解读 CAD 设计稿。请严格按 JSON 格式输出，不要包含多余文字，不要使用 markdown 代码块。',
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: {url: `data:${mediaType};base64,${imageBase64}`}
+          },
+          {
+            type: 'text',
+            text: promptText
+          },
+        ],
+      },
+    ] as ChatCompletionMessageParam[],
+  });
+//console.log(`- 大模型完成`,response)
+  return {
+    rawText: response.choices[0]?.message?.content || '',
+    usage: response.usage,
+  };
+}
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Qwen API 错误: ${response.status} - ${errorText}`)
-  }
+interface OcrWord {
+  text: string;
+}
 
-  const data = await response.json()
-  const rawText = data.choices?.[0]?.message?.content || ''
-  const usage = data.usage
-
-  return { rawText, usage }
+interface OcrResult {
+  allWords?: OcrWord[];
 }
 
 /**
- * 构建识别 Prompt
+ * 构建 Qwen-VL 识别 prompt — 针对 Qwen 优化
+ * - 结构化、具体化指令
+ * - OCR 文字作为必须核对的清单
+ * - 要求输出 ocr_verified / ocr_unverified 交叉校验
  */
-export function buildRecognitionPrompt(ocrResult: OcrResult): string {
-  const ocrContext = ocrResult.fullText ? `\nOCR 提取的文字供参考（可能有误差）：${ocrResult.fullText}` : ''
+export function buildRecognitionPrompt(ocrResult: OcrResult | null): string {
+  const ocrTexts = (ocrResult?.allWords || [])
+    .map(w => `"${w.text}"`)
+    .join('、');
 
-  return `你是专业的 CAD 设计稿识别专家。请分析这张设计图纸，提取结构化信息。
+  const ocrSection = ocrTexts
+    ? `\n## OCR 预提取文字（你必须逐个核对后纳入结果）\n${ocrTexts}\n`
+    : '\n## OCR 未提取到文字\n请完全依赖视觉识别。\n';
 
-识别目标：
-1. drawing_info: 图纸基本信息（标题、比例、单位、图纸类型）
-2. elements: 图纸中的图形元素（墙、门、窗、家具、设备等），每个元素包含：
-   - type: 元素类型
-   - description: 详细描述
-   - position: 位置描述（如"左上角"、"中心偏左"）
-   - properties: 尺寸、材质等属性（键值对）
-   - confidence: 置信度（high/medium/low）
-3. spaces: 识别到的房间/空间（名称、位置、功能、预估面积）
-4. dimensions: 尺寸标注（数值、标注对象、位置）
-5. annotations: 文字标注、说明（内容、位置）
-6. ocr_verified: 视觉确认与 OCR 匹配的文字列表
-7. ocr_unverified: OCR 存在但视觉未确认的文字列表
-8. summary: 简要总结识别结果
+  return `## 任务
+你是一位资深室内设计师，请精确分析这张 CAD 设计稿图片。
 
-请严格以 JSON 格式输出，不要添加其他说明文字。JSON 结构：
+${ocrSection}
+
+## 识别要求（按优先级）
+
+### 第一优先：文字标注核对
+- 逐个核对上述 OCR 文字，确认每个文字在图中的位置和作用
+- 区分：尺寸数字、空间名称、材料说明、标题栏文字、索引符号
+- 输出 ocr_verified（已确认）和 ocr_unverified（无法定位）
+
+### 第二优先：几何元素
+- 板：用"水平/垂直"描述走向，估算长宽高度（120/200/240/370mm）
+- 空间/柜体：名称 + 四至范围
+- 其他配饰：名称 + 位置
+
+### 第三优先：尺寸关联
+- 把尺寸数字关联到对应的板/空间/柜体
+- 例如 "3600" 标注的是哪板/空间/柜体的长宽高度或厚度
+
+## 输出格式
+严格输出 JSON（不要包含 markdown 代码块标记），结构如下：
 {
-  "drawing_info": {},
-  "elements": [],
-  "spaces": [],
-  "dimensions": [],
-  "annotations": [],
-  "ocr_verified": [],
-  "ocr_unverified": [],
-  "summary": ""
-}
-${ocrContext}`
+  "drawing_info": {
+    "title": "图名",
+    "scale": "比例",
+    "type": "平面图/立面图/剖面图/详图",
+    "date": "日期"
+  },
+  "elements": [
+    {
+      "id": 1,
+      "type": "板|空间/柜体|其他配饰",
+      "description": "具体描述",
+      "position": "图中位置（用方位词：左上/中/右下等）",
+      "properties": {
+        "width": "",
+        "height": "",
+        "material": "",
+        "thickness": ""
+      },
+      "confidence": "high|medium|low"
+    }
+  ],
+  "spaces": [
+    {
+      "name": "空间/柜体名称",
+      "estimated_area": "估算面积",
+      "connections": ["相邻空间/柜体"],
+      "position": "位置描述"
+    }
+  ],
+  "dimensions": [
+    {
+      "value": "尺寸值",
+      "target": "标注对象",
+      "position": "位置"
+    }
+  ],
+  "annotations": [
+    {
+      "text": "文字内容",
+      "type": "label|note|title|index",
+      "position": "位置"
+    }
+  ],
+  "ocr_verified": ["已确认的OCR文字列表"],
+  "ocr_unverified": ["无法在图中定位的OCR文字列表"],
+  "summary": "一句话总结图纸内容"
+}`;
 }
 
 /**
- * 构建第一轮粗识别 Prompt
+ * 构建第一轮粗识别 prompt
  */
 export function buildRoughPrompt(): string {
-  return `你是专业的 CAD 设计稿识别专家。请先快速浏览这张设计图纸，给出初步的识别结果。
+  return `请快速扫描这张 CAD 设计稿图片，列出所有可见的元素类型和大致位置。
+不需要详细属性，只需概览。
 
-只需要识别：
-- 整体布局和主要区域（如"客厅"、"卧室"、"厨房"的大致位置）
-- 明显的大型元素（如墙体、主要家具）
-- 最清晰的尺寸标注
-- 图纸类型判断
-
-请严格以 JSON 格式输出，结构同上。`
-}
-
-/**
- * 构建第二轮精化 Prompt
- */
-export function buildRefinePrompt(ocrResult: OcrResult, roughResult: any): string {
-  const ocrContext = ocrResult.fullText ? `\nOCR 提取的文字：${ocrResult.fullText}` : ''
-  const roughContext = roughResult.summary ? `\n第一轮初步识别结果摘要：${roughResult.summary}` : ''
-
-  return `你是专业的 CAD 设计稿识别专家。${roughContext}
-
-请基于第一轮的初步识别，仔细分析这张设计图纸，进行精细化识别：
-1. 补充遗漏的元素和细节
-2. 修正第一轮可能的错误
-3. 特别关注：小元素、尺寸标注、文字标注、材质说明
-4. 检查所有 OCR 提取的文字与视觉内容是否匹配
-${ocrContext}
-
-请严格以 JSON 格式输出完整结果，结构同上。`
-}
-
-/**
- * 解析 Qwen 返回的 JSON
- */
-export function parseQwenJson(rawText: string): any {
-  try {
-    // 清理 markdown 标记
-    let cleanText = rawText
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .replace(/`/g, '')
-      .trim()
-
-    // 尝试提取 JSON 部分
-    const jsonMatch = cleanText.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      cleanText = jsonMatch[0]
+输出 JSON 格式：
+{
+  "rough_elements": [
+    {
+      "type": "元素类型",
+      "position": "大致位置",
+      "count": 数量
     }
+  ],
+  "text_regions": ["文字密集区域描述"],
+  "overall_layout": "整体布局描述"
+}`;
+}
 
-    return JSON.parse(cleanText)
-  } catch (error) {
-    console.warn('解析 Qwen JSON 失败，返回原始文本:', (error as Error).message)
-    return { raw: rawText, summary: '解析失败，请查看原始文本' }
-  }
+interface RoughResult {
+  rough_elements: Array<{
+    type: string;
+    position: string;
+    count: number;
+  }>;
+  text_regions: string[];
+  overall_layout: string;
 }
 
 /**
- * 延时函数
+ * 构建第二轮精化 prompt
+ */
+export function buildRefinePrompt(ocrResult: OcrResult | null, roughResult: RoughResult): string {
+  const basePrompt = buildRecognitionPrompt(ocrResult);
+  const roughJson = JSON.stringify(roughResult, null, 2);
+
+  return `${basePrompt}
+
+## 第一轮粗识别结果（供参考）
+${roughJson}
+
+请在此基础上补充详细属性、尺寸关联、空间信息。
+特别注意检查是否有遗漏的元素。
+输出完整 JSON。`;
+}
+
+/**
+ * 解析 Qwen 返回的 JSON（带容错）
+ */
+export function parseQwenJson(rawText: string): unknown {
+  // 尝试直接解析
+  try { return JSON.parse(rawText); } catch (_) {}
+
+  // 尝试提取 markdown 代码块
+  const mdMatch = rawText.match(/```json\n?([\s\S]*?)\n?```/);
+  if (mdMatch) {
+    try { return JSON.parse(mdMatch[1]); } catch (_) {}
+  }
+
+  // 尝试提取最外层 {}
+  const braceMatch = rawText.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try { return JSON.parse(braceMatch[0]); } catch (_) {}
+  }
+
+  return null;
+}
+
+/**
+ * sleep 工具
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+
+export function buildDocPrompt(Result: any): string {
+
+
+  return `
+
+## 第一轮粗识别结果（供参考）
+
+
+请在此基础上补充详细属性、尺寸关联、空间信息。
+特别注意检查是否有遗漏的元素。
+输出完整 JSON。`;
+}
+
+
+export async function callQwenDoc(prompt: string,systemPrompt:string): Promise<QwenResponse>{
+  const client = createQwenClient()
+  //prompt的字符串长度
+  const response = await client.chat.completions.create({
+    model: prompt.length < 200 ? config.qwen.flashModel : config.qwen.docmodel,
+    messages: [
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: prompt
+          },
+        ],
+      },
+    ] as ChatCompletionMessageParam[],
+  });
+  return {
+    rawText: response.choices[0]?.message?.content || '',
+    usage: response.usage,
+  };
+}
+

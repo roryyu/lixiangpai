@@ -7,6 +7,8 @@ export const config = {
   // 模型
   qwen: {
     model: process.env.QWEN_MODEL || 'qwen-vl-max',
+    docmodel: process.env.QWEN_DOC_MODEL || 'qwen-3.7-max',
+    flashModel: process.env.QWEN_FLASH_MODEL || 'qwen-3.6-flash',
     temperature: parseFloat(process.env.QWEN_TEMPERATURE || '0.1'),
     maxTokens: parseInt(process.env.QWEN_MAX_TOKENS || '8192', 10),
   },

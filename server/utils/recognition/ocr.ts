@@ -1,19 +1,7 @@
 import { config } from './config'
+import Tesseract from 'tesseract.js';
 
-export interface OcrWord {
-  text: string
-  confidence: number
-  bbox: { x0: number; y0: number; x1: number; y1: number }
-  type?: 'dimension' | 'label'
-}
 
-export interface OcrResult {
-  allWords: OcrWord[]
-  dimensions: OcrWord[]
-  labels: OcrWord[]
-  fullText: string
-  engine: string
-}
 
 /**
  * Step 2: OCR 文字提取（简化版）
@@ -23,83 +11,59 @@ export interface OcrResult {
  * 2. 部署独立的 OCR 服务并通过 HTTP 调用
  * 3. 安装 tesseract.js（需要系统依赖）
  */
-export async function ocrStep(imagePath: string): Promise<OcrResult> {
-  console.log('[2/4] OCR 文字提取...')
-  console.log(`  引擎: ${config.ocr.engine}`)
+export async function ocrStep(imagePath: string, consoleLog: (msg: string) => void):  Promise<any> {
 
-  // 简化版本：返回空的 OCR 结果
-  // 实际项目中根据需要实现具体的 OCR 逻辑
-  const mockWords: OcrWord[] = []
+  consoleLog(`- 引擎: ${config.ocr.engine}`)
+  const ocrData = await ocrWithTesseract(imagePath,consoleLog);
+  consoleLog(`- Tesseract 进度: 100%`);
+  const dimensions = ocrData.words
+    .filter(w => /^\d+([xX×]\d+)?$/.test(w.text))
+    .map(w => ({ text: w.text, confidence: w.confidence, bbox: w.bbox, type: 'dimension' }));
 
-  console.log(`  ✓ 识别到 ${mockWords.length} 个文字区域`)
+  const labels = ocrData.words
+    .filter(w => !/^\d+([xX×]\d+)?$/.test(w.text))
+    .map(w => ({ ...w, type: 'label' }));
+
+  consoleLog(`  ✓ 识别到 ${ocrData.words.length} 个文字区域`);
+  consoleLog(`  ✓ 尺寸标注: ${dimensions.length} 个`);
+  consoleLog(`  ✓ 文字标注: ${labels.length} 个`);
 
   return {
-    allWords: mockWords,
-    dimensions: [],
-    labels: [],
-    fullText: '',
+    allWords: ocrData.words,
+    dimensions,
+    labels,
+    fullText: ocrData.fullText,
     engine: config.ocr.engine,
-  }
+  };
 }
 
 /**
- * 通过 HTTP 调用 PaddleOCR 服务
+ * Tesseract OCR
  */
-async function ocrWithPaddle(imagePath: string): Promise<{ words: OcrWord[]; fullText: string }> {
-  const fs = await import('fs')
-  const path = await import('path')
-
-  const imageBuffer = fs.readFileSync(imagePath)
-  const base64 = imageBuffer.toString('base64')
-  const ext = path.extname(imagePath).toLowerCase().slice(1)
-  const mimeMap: Record<string, string> = {
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    png: 'image/png',
-    bmp: 'image/bmp',
-  }
-
-  const formData = new FormData()
-  formData.append('image', base64)
-  formData.append('mime_type', mimeMap[ext] || 'image/png')
-  formData.append('lang', 'ch')
-
-  const resp = await fetch(config.ocr.paddleUrl, {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!resp.ok) {
-    throw new Error(`PaddleOCR 服务错误: ${resp.status}`)
-  }
-
-  const data = await resp.json()
-
-  const words = (data.results || []).map((item: any) => ({
-    text: item.text,
-    confidence: item.confidence * 100,
-    bbox: {
-      x0: item.bbox[0][0],
-      y0: item.bbox[0][1],
-      x1: item.bbox[2][0],
-      y1: item.bbox[2][1],
+async function ocrWithTesseract(imagePath: string, consoleLog: (msg: string) => void):  Promise<any> {
+  const worker = await Tesseract.createWorker(config.ocr.tesseractLang, 1, {
+    logger: m => {
+      if (m.status === 'recognizing text') {
+        process.stdout.write(`\r  Tesseract 进度: ${Math.round(m.progress * 100)}%`);
+      }
     },
-  }))
+  });
 
-  return { words, fullText: words.map((w: OcrWord) => w.text).join(' ') }
-}
+  await worker.setParameters({
+    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+    preserve_interword_spaces: '1',
+  });
 
-/**
- * 分类 OCR 结果：尺寸数字 vs 文字标注
- */
-export function classifyOcrWords(words: OcrWord[]) {
-  const dimensions = words
-    .filter((w) => /^\d+([xX×]\d+)?$/.test(w.text))
-    .map((w) => ({ ...w, type: 'dimension' as const }))
+  const { data } = await worker.recognize(imagePath);
+  await worker.terminate();
+  console.log(''); // 换行
+  const words = data.words
+    .filter(w => w.confidence > 40)
+    .map(w => ({
+      text: w.text.trim(),
+      confidence: w.confidence,
+      bbox: { x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 },
+    }));
 
-  const labels = words
-    .filter((w) => !/^\d+([xX×]\d+)?$/.test(w.text))
-    .map((w) => ({ ...w, type: 'label' as const }))
-
-  return { dimensions, labels }
+  return { words, fullText: data.text };
 }

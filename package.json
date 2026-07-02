@@ -17,9 +17,12 @@
     "bcryptjs": "^3.0.3",
     "element-plus": "^2.14.2",
     "jsonwebtoken": "^9.0.3",
+    "marked": "^18.0.5",
     "nuxt": "^4.4.8",
+    "openai": "^6.45.0",
     "pg": "^8.22.0",
     "sharp": "^0.35.3",
+    "tesseract.js": "^5.1.1",
     "vue": "^3.5.38",
     "vue-router": "^5.1.0",
     "zod": "^4.4.3"
