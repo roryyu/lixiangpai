@@ -18,6 +18,16 @@ export default defineEventHandler(async (event) => {
   }
 
   const formData = await readFormData(event)
+  const continueTask = formData.get('continue') as string
+  if(continueTask){
+    const taskid = formData.get('taskid') as string
+    const imagePath = formData.get('imagePath') as string
+    const userRequirement = formData.get('userRequirement') as string
+    executeRecognitionTask(taskid, imagePath, userRequirement)
+    return {
+      success: true
+    }
+  }
   const imageFile = formData.get('image') as File
   const userRequirement=formData.get('name') as string
 
@@ -58,6 +68,7 @@ export default defineEventHandler(async (event) => {
       message: '任务已创建，等待处理...',
       inputData: JSON.stringify({
         imagePath,
+        userRequirement,
         originalName: imageFile.name,
         fileSize: imageFile.size,
       }),
@@ -226,7 +237,7 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
     await consoleLog('设计分析完成...')
     // 用uploadToOSSAndSaveRecord上传图纸
     await consoleLog('清理缓存...')
-    const imageUrl = await uploadToOSSAndSaveRecord(imagePath)
+    const imageObj = await uploadToOSSAndSaveRecord(imagePath)
 
     // 完成
     await prisma.task.update({
@@ -237,7 +248,8 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
         message: logs.join('\n\r'),
         inputData: JSON.stringify({
           "userRequirement": userRequirement,
-          "imageUrl":imageUrl.ossUrl
+          "bucket": imageObj.bucket, 
+          "ossKey": imageObj.ossKey
         }),
         outputData: JSON.stringify(result.result),
         completedAt: new Date(),

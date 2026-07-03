@@ -2,7 +2,6 @@ import path from 'path'
 import { config } from './config'
 import { createQwenClient, callQwenVL, buildRecognitionPrompt, buildRoughPrompt, buildRefinePrompt, parseQwenJson, sleep } from './qwen'
 import { imageToBase64, splitImage } from './image'
-import type { OcrResult, OcrWord } from './ocr'
 
 export interface VisionResult {
   result: any
@@ -16,7 +15,7 @@ export interface VisionResult {
 /**
  * Step 3: Qwen-VL 视觉识别
  */
-export async function visionStep(imagePath: string, ocrResult: OcrResult,consoleLog: (msg: string) => void): Promise<VisionResult> {
+export async function visionStep(imagePath: string, ocrResult: any,consoleLog: (msg: string) => void): Promise<VisionResult> {
   
 
 
@@ -44,7 +43,7 @@ export async function visionStep(imagePath: string, ocrResult: OcrResult,console
 async function visionStepSingle(
   client: ReturnType<typeof createQwenClient>,
   imagePath: string,
-  ocrResult: OcrResult
+  ocrResult: any
 ): Promise<VisionResult> {
   console.log('  模式: 单轮识别')
 
@@ -70,7 +69,7 @@ async function visionStepSingle(
 async function visionStepTwoPass(
   client: ReturnType<typeof createQwenClient>,
   imagePath: string,
-  ocrResult: OcrResult,
+  ocrResult: any,
   stepResult:string,
   consoleLog: (msg: string) => void
 ): Promise<VisionResult> {
@@ -110,7 +109,7 @@ async function visionStepTwoPass(
 async function visionStepTiled(
   client: ReturnType<typeof createQwenClient>,
   imagePath: string,
-  ocrResult: OcrResult,
+  ocrResult: any,
   consoleLog: (msg: string) => void
 ): Promise<VisionResult> {
   consoleLog(`- 模式: 分块识别 (${config.tile.size}px, 重叠${config.tile.overlap})`)
@@ -163,7 +162,7 @@ async function visionStepTiled(
 /**
  * 过滤指定区域内的 OCR 文字
  */
-function filterOcrByRegion(ocrResult: OcrResult, tile: { x: number; y: number; width: number; height: number }): OcrResult {
+function filterOcrByRegion(ocrResult: any, tile: { x: number; y: number; width: number; height: number }): any {
   const words = (ocrResult?.allWords || []).filter((w) => {
     const cx = (w.bbox.x0 + w.bbox.x1) / 2
     const cy = (w.bbox.y0 + w.bbox.y1) / 2

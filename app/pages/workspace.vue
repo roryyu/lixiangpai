@@ -96,7 +96,7 @@ function removeFile(index: number) {
 async function pollTaskStatus(taskId: string) {
   isPolling.value = true
   let pollCount = 0
-  const maxPolls = 600 // 最多轮询60次
+  const maxPolls = 200 // 最多轮询60次
 
   while (isPolling.value && pollCount < maxPolls) {
     try {
@@ -141,7 +141,7 @@ async function pollTaskStatus(taskId: string) {
     pollCount++
     
     // 每2秒轮询一次
-    await new Promise(resolve => setTimeout(resolve, 2000)) // 每2秒轮询一次
+    await new Promise(resolve => setTimeout(resolve, 2000+pollCount*10)) // 每2秒轮询一次
   }
 
   isPolling.value = false
@@ -258,33 +258,91 @@ async function loadTaskDetail(taskId: string) {
 
     // 渲染用户消息：inputData 的 userRequirement 和 imageUrl
     const inputData = task.inputData || {}
-    const userMessage = {
-      id: Date.now().toString() + '_user',
-      type: 'user',
-      content: inputData.userRequirement || task.name || '上传图片进行识别',
-      files: inputData.imageUrl ? [{
-        name: '上传图片',
-        size: 0,
-        url: inputData.imageUrl,
-      }] : [],
-      timestamp: task.createdAt,
+    if(task.status === 'COMPLETED'){
+          const ossItem =await $fetch(`/api/oss/presigned?bucket=${inputData.bucket}&osskey=${inputData.ossKey}`) as any
+          const userMessage = {
+            id: Date.now().toString() + '_user',
+            type: 'user',
+            content: inputData.userRequirement || task.name || '上传图片进行识别',
+            files: ossItem.url ? [{
+              name: '上传图片',
+              size: 0,
+              url: ossItem.url,
+            }] : [],
+            timestamp: task.createdAt,
+          }
+          chatMessages.value.push(userMessage)
+              // 渲染 AI 回复：outputData
+          const aiMessage = {
+            id: Date.now().toString() + '_ai',
+            type: 'ai',
+            taskId: task.id,
+            status: task.status,
+            progress: task.status === 'COMPLETED' ? 100 : 0,
+            message: task.message || '',
+            response: task.outputData,
+            resultData: task.outputData,
+            error: task.errorMsg,
+            timestamp: task.updatedAt,
+          }
+          chatMessages.value.push(aiMessage)
     }
-    chatMessages.value.push(userMessage)
+    if(task.status === 'RUNNING'){
+      //TODO
+          // 添加用户消息（上传图片）
+        const base64Result = await $fetch('/api/image/to-base64', {
+          method: 'POST',
+          body: { path: inputData.imagePath }
+        }) as any
+        const userMessage = {
+          id: Date.now().toString(),
+          type: 'user',
+          content: inputData.userRequirement || '上传图片进行识别',
+          files: [{base64:base64Result.base64}],
+          timestamp: new Date(),
+        }
+        chatMessages.value.push(userMessage)
+        // 清空输入
+        message.value = ''
+        uploadedFiles.value = []
+        previewUrls.value.forEach(url => URL.revokeObjectURL(url))
+        previewUrls.value = []
+        const aiMessage = {
+              id: Date.now().toString() + '_ai',
+              type: 'ai',
+              taskId: '',
+              status: 'PENDING',
+              progress: 0,
+              message: '任务创建中...',
+              response: null,
+              resultData: null,
+              error: null,
+              timestamp: new Date(),
+        }
+        chatMessages.value.push(aiMessage)
+            // 调用开始任务接口
+        const formData = new FormData()
+        formData.append('continue', '1')
+        formData.append('userRequirement', inputData.userRequirement)
+        formData.append('taskid', task.id)
+        formData.append('imagePath', inputData.imagePath)
 
-    // 渲染 AI 回复：outputData
-    const aiMessage = {
-      id: Date.now().toString() + '_ai',
-      type: 'ai',
-      taskId: task.id,
-      status: task.status,
-      progress: task.status === 'COMPLETED' ? 100 : 0,
-      message: task.message || '',
-      response: task.outputData,
-      resultData: task.outputData,
-      error: task.errorMsg,
-      timestamp: task.updatedAt,
+        await $fetch('/api/tasks/start', {
+          method: 'POST',
+          body: formData,
+        }) as any
+
+        currentTask.value = task
+        aiMessage.taskId = task.id
+        aiMessage.status = task.status
+        aiMessage.message = task.message
+
+        // 开始轮询任务状态
+        await pollTaskStatus(task.id)
+        await loadHistories()
     }
-    chatMessages.value.push(aiMessage)
+
+
 
   } catch (error) {
     console.error('加载任务详情失败:', error)

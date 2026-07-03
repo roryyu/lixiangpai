@@ -82,7 +82,7 @@ export function readResultFile(filePath: string): any {
 export async function uploadToOSSAndSaveRecord(
   filePath: string,
   filename?: string
-): Promise<{ id: string; name: string | null; type: string | null; key: string | null; etag: string | null; ossUrl: string | null }> {
+): Promise<any> {
   // 提取文件名和扩展名
   const baseName = filename || path.basename(filePath)
   const ext = path.extname(baseName).toLowerCase()
@@ -132,5 +132,5 @@ export async function uploadToOSSAndSaveRecord(
   console.log(path.join(RESULT_DIR, `${baseName}.preprocessed${ext}`))
 
   
-  return fileRecord
+  return {bucket, ossKey}
 }

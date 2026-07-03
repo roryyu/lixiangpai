@@ -18,7 +18,7 @@ export async function postprocessStep(ocrResult: any, visionResult: VisionResult
   const missingDims = ocrDims.filter((od) => !visionDims.some((vd: any) => vd.value === od.text || vd.value?.includes(od.text)))
 
   if (missingDims.length > 0) {
-    issues.push(`Qwen 遗漏 ${missingDims.length} 个尺寸标注，已从 OCR 补充`)
+    issues.push(`大模型遗漏 ${missingDims.length} 个尺寸标注，已从 OCR 补充`)
     result.dimensions = [
       ...visionDims,
       ...missingDims.map((d) => ({

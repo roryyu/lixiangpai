@@ -47,6 +47,27 @@ export async function preprocessImage(inputPath: string, outputBase: string, con
     .png()
     .toFile(binaryPath)
 
+  const binary90Path = outputBase + '.binary.90.png'
+  await sharp(preprocessedPath)
+    .threshold(128)
+    .rotate(90)
+    .png()
+    .toFile(binary90Path)
+
+  const binary180Path = outputBase + '.binary.180.png'
+  await sharp(preprocessedPath)
+    .threshold(128)
+    .rotate(180)
+    .png()
+    .toFile(binary180Path)
+
+  const binary270Path = outputBase + '.binary.270.png'
+  await sharp(preprocessedPath)
+    .threshold(128)
+    .rotate(270)
+    .png()
+    .toFile(binary270Path)
+
   // 3. 对比度增强版本（扫描件用）
   consoleLog(`- 生成对比度增强图片（用于扫描件）`)
   const enhancedPath = outputBase + '.enhanced.png'
@@ -64,6 +85,9 @@ export async function preprocessImage(inputPath: string, outputBase: string, con
     preprocessedPath,
     binaryPath,
     enhancedPath,
+    binary90Path,
+    binary180Path,
+    binary270Path,
     metadata: {
       originalWidth: metadata.width,
       originalHeight: metadata.height,
