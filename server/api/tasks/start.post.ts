@@ -2,7 +2,7 @@ import { prisma } from '../../utils/prisma'
 import { getUserFromToken } from '../../utils/auth'
 import { saveUploadedFile, validateImageFile, validateFileSize, RESULT_DIR,uploadToOSSAndSaveRecord,uploadToOSSbyUrl } from '../../utils/upload'
 import { recognizeImage } from '../../utils/recognition'
-import { callQwenDoc,generateImage } from '../../utils/recognition/qwen'
+import { callQwenDoc,generateImage,generateImageBySize } from '../../utils/recognition/qwen'
 // 简单的 sleep 辅助函数
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -238,7 +238,7 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
     await consoleLog('设计分析完成...')
     // 用uploadToOSSAndSaveRecord上传图纸
     await consoleLog('生成效果图...')
-    const resultImage = await generateImage(buildDocPrompt(result.result,userRequirement+"\n\r# 修改建议：\n\r"+suggestion,taskImagePrompt?.prompt || '')) 
+    const resultImage = await generateImageBySize(buildDocPrompt(result.result,userRequirement+"\n\r# 修改建议：\n\r"+suggestion,taskImagePrompt?.prompt || ''),'2368*1728') 
     //const resultImage = await generateImage('建议：'+suggestion+'\n\r任务：'+taskImagePrompt?.prompt || '')
     // TODO：转存到oss，返回url，并返回bucket和ossKey，更新outputData
     if(resultImage){

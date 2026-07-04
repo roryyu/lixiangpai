@@ -1,7 +1,16 @@
 import { prisma } from '../../../utils/prisma'
+import { getUserFromToken } from '../../../utils/auth'
 
 // 这个接口用于第三方服务回调，通知任务完成或失败
 export default defineEventHandler(async (event) => {
+  const user = getUserFromToken(event)
+  if (!user) {
+    throw createError({
+      statusCode: 401,
+      message: '未授权',
+    })
+  }
+
   const taskId = getRouterParam(event, 'id')
   if (!taskId) {
     throw createError({

@@ -3,6 +3,7 @@ export const config = {
   // DashScope
   dashscopeApiKey: process.env.DASHSCOPE_API_KEY || '',
   dashscopeBaseUrl: process.env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  dashscopeAntropicBaseUrl: process.env.DASHSCOPE_BASE_ANTHROPIC_URL || 'https://dashscope.aliyuncs.com/api/v1',
 
   // 模型
   qwen: {

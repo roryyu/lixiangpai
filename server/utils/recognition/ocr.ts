@@ -15,13 +15,13 @@ export async function ocrStep(binaryPath: string, binary90Path: string, binary18
 
   consoleLog(`- 引擎: ${config.ocr.engine}`)
   const ocrData = await ocrWithTesseract(binaryPath,consoleLog,0);
-  consoleLog(`- Tesseract 进度: 25%`);
+  consoleLog(`- Tesseract 进度: 25% 旋转0°`);
   const ocrData90 = await ocrWithTesseract(binary90Path,consoleLog,90);
-  consoleLog(`- Tesseract 进度: 50%`);
+  consoleLog(`- Tesseract 进度: 50% 旋转90°`);
   const ocrData180 = await ocrWithTesseract(binary180Path,consoleLog,180);
-  consoleLog(`- Tesseract 进度: 75%`);
+  consoleLog(`- Tesseract 进度: 75% 旋转180°`);
   const ocrData270 = await ocrWithTesseract(binary270Path,consoleLog,270);
-  consoleLog(`- Tesseract 进度: 100%`);
+  consoleLog(`- Tesseract 进度: 100% 旋转270°`);
   const allWords = [...ocrData.words, ...ocrData90.words, ...ocrData180.words, ...ocrData270.words];
   const filteredWords = deduplicateWords(allWords);
   const allFullText = ocrData.fullText+' '+ocrData90.fullText+' '+ocrData180.fullText+' '+ocrData270.fullText;

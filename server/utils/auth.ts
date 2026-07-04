@@ -1,7 +1,10 @@
 import jwt from 'jsonwebtoken'
 import bcryptjs from 'bcryptjs'
 
-const SECRET = process.env.AUTH_SECRET || 'fallback-secret'
+const SECRET = process.env.AUTH_SECRET
+if (!SECRET) {
+  throw new Error('AUTH_SECRET 环境变量未设置，请在 .env 中配置')
+}
 
 export function hashPassword(password: string): Promise<string> {
   return bcryptjs.hash(password, 12)

@@ -312,7 +312,8 @@ export async function generateImage(prompt: any): Promise<any> {
           size: "2048*2048", // 支持 1024x1024/1024x1536/1536x1024
           n: 1,               // 生成图片数量（1-6）
           negative_prompt: "低画质，模糊，文字扭曲", // 负向提示词
-          watermark: false    // 是否添加水印
+          watermark: false,    // 是否添加水印
+          prompt_extend: false,
         }
       }
     });
@@ -326,3 +327,58 @@ export async function generateImage(prompt: any): Promise<any> {
   }
 }
 
+export async function generateImageBySize(prompt: string, size: string = '2048*2048'): Promise<any> {
+  try {
+    const apiUrl = config.dashscopeAntropicBaseUrl+'/services/aigc/multimodal-generation/generation';
+    const apiKey = config.dashscopeApiKey;
+
+    if (!apiKey) {
+      throw new Error('DASHSCOPE_API_KEY 未配置，请在 .env 中设置');
+    }
+
+    const payload = {
+      model: config.qwen.imageModel,
+      input: {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                text: prompt
+              }
+            ]
+          }
+        ]
+      },
+      parameters: {
+        negative_prompt: '低分辨率，低画质，画面过饱和，无细节，过度光滑，构图混乱，文字模糊，文字乱码，文字扭曲',
+        prompt_extend: false,
+        watermark: false,
+        n: 1,
+        size: size
+      }
+    };
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API 请求失败: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    const imageUrl = result.output.choices[0]?.message?.content[0]?.image;
+    console.log("生成图片地址:", imageUrl);
+    return imageUrl;
+  } catch (error: any) {
+    console.error("API 调用失败:", error.message);
+    throw error;
+  }
+}
