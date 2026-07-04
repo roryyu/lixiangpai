@@ -272,6 +272,12 @@ async function loadTaskDetail(taskId: string) {
             timestamp: task.createdAt,
           }
           chatMessages.value.push(userMessage)
+
+          if(task.outputData?.resultImageBucket && task.outputData?.resultImageOssKey){
+            const ossResultItem =await $fetch(`/api/oss/presigned?bucket=${task.outputData?.resultImageBucket}&osskey=${task.outputData?.resultImageOssKey}`) as any
+            task.outputData.resultImage = ossResultItem.url
+          }
+
               // 渲染 AI 回复：outputData
           const aiMessage = {
             id: Date.now().toString() + '_ai',
@@ -591,12 +597,19 @@ onMounted(() => {
 
                         <!-- 摘要 -->
                         <div v-if="msg.resultData.summary" class="result-section">
-                          <h4>📝 摘要</h4>
+                          <h4>📝 图纸分析</h4>
                           <div v-html="renderMarkdown(msg.resultData.summary)" class="markdown-content summary-text"></div>
                         </div>
                         <!-- 建议 -->
                         <div v-if="msg.resultData.suggestion" class="result-section">
+                          <h4>💡 修改建议</h4>
                           <div v-html="renderMarkdown(msg.resultData.suggestion)" class="markdown-content summary-text"></div>
+                        </div>
+                        <div v-if="msg.resultData.resultImage" class="result-section">
+                          <h4>🖼️ 效果图</h4>
+                          <div>
+                            <img :src="msg.resultData.resultImage" alt="识别结果" class="result-image" />
+                          </div>
                         </div>
                       </div>
 
@@ -1415,5 +1428,10 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.2;
   color: #3c3d3e;
+}
+.result-image{
+  display: block;
+  margin: 0 auto;
+  width: 90%;
 }
 </style>

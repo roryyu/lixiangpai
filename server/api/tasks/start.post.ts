@@ -1,8 +1,8 @@
 import { prisma } from '../../utils/prisma'
 import { getUserFromToken } from '../../utils/auth'
-import { saveUploadedFile, validateImageFile, validateFileSize, RESULT_DIR,uploadToOSSAndSaveRecord } from '../../utils/upload'
+import { saveUploadedFile, validateImageFile, validateFileSize, RESULT_DIR,uploadToOSSAndSaveRecord,uploadToOSSbyUrl } from '../../utils/upload'
 import { recognizeImage } from '../../utils/recognition'
-import { callQwenDoc } from '../../utils/recognition/qwen'
+import { callQwenDoc,generateImage } from '../../utils/recognition/qwen'
 // 简单的 sleep 辅助函数
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -98,24 +98,23 @@ function buildDocPrompt(Result: any, userRequirement:any,taskPrompt:any): string
 
 
   return `
-现在已经从设计稿分析出了结构化的数据。
-# 识别数据的逻辑和数据的意义如下：
-## 识别要求（按优先级）
-
+# 任务描述：
+${taskPrompt}
+# 用户需求如下：
+${userRequirement}
+# 以下为图纸分析出了结构化的数据。
+## 识别规格（按优先级）
 ### 第一优先：文字标注核对
 - 逐个核对上述 OCR 文字，确认每个文字在图中的位置和作用
 - 区分：尺寸数字、空间名称、材料说明、标题栏文字、索引符号
 - 输出 ocr_verified（已确认）和 ocr_unverified（无法定位）
-
 ### 第二优先：几何元素
 - 板：用"水平/垂直"描述走向，估算长宽高度（120/200/240/370mm）
 - 空间/柜体：名称 + 四至范围
 - 其他配饰：名称 + 位置
-
 ### 第三优先：尺寸关联
 - 把尺寸数字关联到对应的板/空间/柜体
 - 例如 "3600" 标注的是哪板/空间/柜体的长宽高度或厚度
-
 ## 输出格式
 严格输出 JSON（不要包含 markdown 代码块标记），结构如下：
 {
@@ -166,11 +165,8 @@ function buildDocPrompt(Result: any, userRequirement:any,taskPrompt:any): string
   "ocr_unverified": ["无法在图中定位的OCR文字列表"],
   "summary": "一句话总结图纸内容"
 }
-# 数据结果如下：
+## 数据结果如下：
   ${JSON.stringify(Result)}
-# 用户需求如下：
-${userRequirement}
-${taskPrompt}
 `;
 }
 async function executeRecognitionTask(taskId: string, imagePath: string,userRequirement: string) {
@@ -229,6 +225,11 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
         module: 'task',
       },
     })
+    const taskImagePrompt = await prisma.promptSetting.findFirst({
+      where: {
+        module: 'task-image',
+      },
+    })
     const getSuggestion= await callQwenDoc(buildDocPrompt(result.result,userRequirement,taskPrompt?.prompt || ''),systemPrompt?.prompt || '')
     const suggestion = getSuggestion.rawText.trim()
     if (result.result) {
@@ -236,9 +237,19 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
     }
     await consoleLog('设计分析完成...')
     // 用uploadToOSSAndSaveRecord上传图纸
+    await consoleLog('生成效果图...')
+    const resultImage = await generateImage(buildDocPrompt(result.result,userRequirement+"\n\r# 修改建议：\n\r"+suggestion,taskImagePrompt?.prompt || '')) 
+    //const resultImage = await generateImage('建议：'+suggestion+'\n\r任务：'+taskImagePrompt?.prompt || '')
+    // TODO：转存到oss，返回url，并返回bucket和ossKey，更新outputData
+    if(resultImage){
+      const ossImage = await uploadToOSSbyUrl(resultImage)
+      ;(result.result as any).resultImage = ossImage.ossUrl
+      ;(result.result as any).resultImageBucket = ossImage.bucket
+      ;(result.result as any).resultImageOssKey = ossImage.ossKey
+    }
+    
     await consoleLog('清理缓存...')
     const imageObj = await uploadToOSSAndSaveRecord(imagePath)
-
     // 完成
     await prisma.task.update({
       where: { id: taskId },

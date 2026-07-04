@@ -3,6 +3,12 @@ import path from 'path'
 import { uploadFile as uploadToOSS, getPresignedUrl, getOSSClient } from './oss'
 import { prisma } from './prisma'
 
+function imagepathToBase64(imagePath: string): string {
+  return `data:image/jpeg;base64,${fs.readFileSync(imagePath).toString('base64')}`
+}
+
+
+
 // 上传目录配置
 export const UPLOAD_DIR = path.join(process.cwd(), 'uploads')
 export const RESULT_DIR = path.join(process.cwd(), 'results')
@@ -86,7 +92,7 @@ export async function uploadToOSSAndSaveRecord(
   // 提取文件名和扩展名
   const baseName = filename || path.basename(filePath)
   const ext = path.extname(baseName).toLowerCase()
-  
+  //const base64 = imagepathToBase64(filePath)
   // 读取文件内容
   const fileBuffer = fs.readFileSync(filePath)
   
@@ -123,7 +129,7 @@ export async function uploadToOSSAndSaveRecord(
       ossUrl,
     },
   })
-  console.log('baseName',baseName)
+  //console.log('baseName',baseName)
   // 删除本地暂存文件
   deleteFile(filePath)
   //删除RESULT_DIR下相关的文件binary，enhanced，preprocessed文件
@@ -133,4 +139,86 @@ export async function uploadToOSSAndSaveRecord(
 
   
   return {bucket, ossKey}
+}
+
+
+/**
+ * 从图片 URL 下载图片到本地，上传到 OSS，清除本地缓存，并更新 File 表
+ * @param imageUrl 图片 URL
+ * @returns { bucket, ossKey, ossUrl }
+ */
+export async function uploadToOSSbyUrl(imageUrl: string): Promise<{ bucket: string; ossKey: string; ossUrl: string }> {
+  ensureUploadDirs()
+
+  // 从 URL 中提取文件名
+  const url = new URL(imageUrl)
+  const pathname = url.pathname
+  const originalFilename = path.basename(pathname) || `image-${Date.now()}.jpg`
+  const ext = path.extname(originalFilename).toLowerCase() || '.jpg'
+
+  // 生成本地临时文件名
+  const timestamp = Date.now()
+  const random = Math.random().toString(36).slice(2, 8)
+  const localFilename = `${timestamp}-${random}${ext}`
+  const localFilePath = path.join(RESULT_DIR, localFilename)
+
+  try {
+    // 下载图片到本地
+    const httpModule = imageUrl.startsWith('https') ? await import('https') : await import('http')
+
+    await new Promise<void>((resolve, reject) => {
+      const fileStream = fs.createWriteStream(localFilePath)
+      httpModule.get(imageUrl, (response) => {
+        response.pipe(fileStream)
+        fileStream.on('finish', () => {
+          fileStream.close()
+          resolve()
+        })
+      }).on('error', (err) => {
+        fs.unlink(localFilePath, () => {})
+        reject(new Error(`下载图片失败: ${err.message}`))
+      })
+    })
+
+    // 读取文件内容
+    const fileBuffer = fs.readFileSync(localFilePath)
+
+    // 生成 OSS key
+    const ossKey = `uploads/${timestamp}-${random}${ext}`
+
+    // 获取 bucket 配置
+    const client = getOSSClient()
+    const bucket = (client as any).options.bucket
+
+    // 上传到 OSS
+    const { etag } = await uploadToOSS({
+      bucket,
+      key: ossKey,
+      body: fileBuffer,
+    })
+
+    // 获取预签名 URL
+    const ossUrl = await getPresignedUrl(bucket, ossKey)
+
+    // 检测文件类型
+    const imageExts = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp']
+    const fileType = imageExts.includes(ext) ? 'image' : 'file'
+
+    // 创建数据库记录
+    await prisma.file.create({
+      data: {
+        name: originalFilename,
+        type: fileType,
+        key: ossKey,
+        etag,
+        ossUrl,
+      },
+    })
+
+    // 返回结果
+    return { bucket, ossKey, ossUrl }
+  } finally {
+    // 清除本地缓存图片
+    deleteFile(localFilePath)
+  }
 }

@@ -288,3 +288,41 @@ export async function callQwenDoc(prompt: string,systemPrompt:string): Promise<Q
   };
 }
 
+
+export async function generateImage(prompt: any): Promise<any> {
+  try {
+    const client = createQwenClient()
+    const response:any = await client.chat.completions.create({
+      model: config.qwen.imageModel, // 必须指定模型名称
+      messages: [
+        {
+          role: "user",
+          content: [
+            // 提示词文本
+            {
+              type: "text",
+              text: prompt
+            }
+          ]
+        }
+      ],
+      // 百炼特有参数（需按需配置）
+      extra_body: {
+        parameters: {
+          size: "2048*2048", // 支持 1024x1024/1024x1536/1536x1024
+          n: 1,               // 生成图片数量（1-6）
+          negative_prompt: "低画质，模糊，文字扭曲", // 负向提示词
+          watermark: false    // 是否添加水印
+        }
+      }
+    });
+
+    // 提取生成的图片 URL（有效期 24 小时）
+    const imageUrl = response.output.choices[0]?.message?.content[0]?.image;
+    console.log("@@@@@@@@@@@@@@@@@@@@@@@@生成图片地址:", response.output.choices[0]?.message?.content[0]);
+    return imageUrl;
+  } catch (error) {
+    console.error("API 调用失败:", error.response?.data || error.message);
+  }
+}
+
