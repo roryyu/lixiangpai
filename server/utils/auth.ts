@@ -44,3 +44,27 @@ export function getUserFromToken(event: any): { userId: string; email: string } 
   if (!token) return null
   return verifyToken(token)
 }
+
+export async function getAdminUser(event: any) {
+  const payload = getUserFromToken(event)
+  if (!payload) {
+    throw createError({
+      statusCode: 401,
+      message: '未授权',
+    })
+  }
+
+  const { prisma } = await import('./prisma')
+  const user = await prisma.user.findUnique({
+    where: { id: payload.userId },
+  })
+
+  if (!user || user.role !== 'ADMIN') {
+    throw createError({
+      statusCode: 403,
+      message: '无权限执行此操作',
+    })
+  }
+
+  return user
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Upload, CircleClose, Promotion, Picture, Check, Close, Delete } from '@element-plus/icons-vue'
+import { Upload, CircleClose, Promotion, Picture, Check, Close, Delete, Setting } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { ref, watch, nextTick } from 'vue'
 
@@ -52,6 +52,12 @@ function fileToBase64(file: File): Promise<string> {
 async function handleLogout() {
   await signOut()
   router.push('/login')
+}
+
+function handleMenuCommand(command: string) {
+  //if (command === 'prompt') {
+    router.push('/'+command)
+  //}
 }
 
 async function loadHistories() {
@@ -402,6 +408,18 @@ onMounted(() => {
           </NuxtLink>
         </div>
         <div class="header-right">
+          <el-dropdown v-if="authData?.user?.role === 'ADMIN'" @command="handleMenuCommand">
+            <span class="admin-menu">
+              <el-icon><Setting /></el-icon>
+              管理
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="prompt">提示词管理</el-dropdown-item>
+                <el-dropdown-item command="users">用户管理</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <span class="user-name">{{ authData?.user?.name || authData?.user?.email }}</span>
           <el-button type="danger" plain size="small" @click="handleLogout">
             退出登录
@@ -716,6 +734,23 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.admin-menu {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: #606266;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.admin-menu:hover {
+  background: #f0f9ff;
+  color: #22c55e;
 }
 
 .user-name {

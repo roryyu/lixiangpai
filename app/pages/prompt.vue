@@ -5,7 +5,12 @@ definePageMeta({
   middleware: 'auth',
 })
 
-const { data: session, getSession } = useAuth()
+const { data: session } = useAuth()
+
+const isAdmin = computed(() => {
+  const data = session.value as any
+  return data?.user?.role === 'ADMIN'
+})
 
 interface PromptSetting {
   id: string
@@ -64,6 +69,8 @@ const renderMarkdown = (text: string) => {
 const promptHtml = computed(() => renderMarkdown(formData.value.prompt || ''))
 
 const fetchPrompts = async () => {
+  if (!isAdmin.value) return
+  
   loading.value = true
   try {
     const res = await $fetch('/api/prompts', {
@@ -147,12 +154,17 @@ onMounted(() => {
 
 <template>
   <div class="prompt-page">
-    <div class="header">
-      <h2>Prompt 管理</h2>
-      <el-button type="primary" @click="handleAdd">新增 Prompt</el-button>
+    <div v-if="!isAdmin" class="no-permission">
+      <el-empty description="无权限访问此页面" />
     </div>
 
-    <el-table :data="prompts" v-loading="loading" stripe style="width: 100%">
+    <div v-else>
+      <div class="header">
+        <h2>Prompt 管理</h2>
+        <el-button type="primary" @click="handleAdd">新增 Prompt</el-button>
+      </div>
+
+      <el-table :data="prompts" v-loading="loading" stripe style="width: 100%">
       <el-table-column prop="module" label="模块" width="200" />
       <el-table-column prop="info" label="说明" width="200" />
       <el-table-column prop="createdAt" label="创建时间" width="180">
@@ -178,7 +190,9 @@ onMounted(() => {
           </el-button>
         </template>
       </el-table-column>
-    </el-table>
+      </el-table>
+
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -221,6 +235,13 @@ onMounted(() => {
 <style scoped>
 .prompt-page {
   padding: 20px;
+}
+
+.no-permission {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
 }
 
 .header {

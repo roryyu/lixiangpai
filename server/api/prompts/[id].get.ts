@@ -1,14 +1,8 @@
 import { prisma } from '../../utils/prisma'
-import { getUserFromToken } from '../../utils/auth'
+import { getAdminUser } from '../../utils/auth'
 
 export default defineEventHandler(async (event) => {
-  const payload = getUserFromToken(event)
-  if (!payload) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权',
-    })
-  }
+  await getAdminUser(event)
 
   const id = getRouterParam(event, 'id')
 
