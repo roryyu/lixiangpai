@@ -169,6 +169,37 @@ ${userRequirement}
   ${JSON.stringify(Result)}
 `;
 }
+/**
+ * 压缩任务上下文：将识图结果+分析+建议摘要化，供后续迭代对话使用
+ */
+async function compressTaskContext(recognitionResult: any, userRequirement: string, suggestion: string): Promise<string> {
+  const contextPrompt = `
+# 任务上下文压缩
+请将以下室内设计分析信息压缩为一段简洁的上下文摘要（500字以内），保留关键信息，供后续迭代设计使用。
+
+## 用户原始需求
+${userRequirement}
+
+## 图纸识别结果
+- 图纸类型：${recognitionResult?.drawing_info?.type || '未知'}
+- 图纸标题：${recognitionResult?.drawing_info?.title || '未知'}
+- 识别元素数量：${recognitionResult?.elements?.length || 0}
+- 空间/柜体数量：${recognitionResult?.spaces?.length || 0}
+- 关键元素：${(recognitionResult?.elements || []).slice(0, 8).map((e: any) => `${e.type}(${e.description})`).join('、')}
+- 空间列表：${(recognitionResult?.spaces || []).map((s: any) => s.name).join('、')}
+- 关键尺寸：${(recognitionResult?.dimensions || []).map((d: any) => `${d.value}→${d.target}`).join('、')}
+- 图纸摘要：${recognitionResult?.summary || '无'}
+
+## 设计建议
+${suggestion}
+
+## 输出要求
+请输出压缩后的上下文摘要文本，包含：用户需求、图纸概况、核心设计要点、已有建议。直接输出文本，不要使用JSON格式。`
+
+  const result = await callQwenDoc(contextPrompt, '你是一个专业的上下文压缩助手，请精准提炼关键信息。')
+  return result.rawText.trim()
+}
+
 async function executeRecognitionTask(taskId: string, imagePath: string,userRequirement: string) {
   let logs: string[] = []
   let progressIndex = 0
@@ -236,18 +267,33 @@ async function executeRecognitionTask(taskId: string, imagePath: string,userRequ
       ;(result.result as any).suggestion = suggestion
     }
     await consoleLog('设计分析完成...')
+
+    // 压缩上下文：将识图-分析-建议摘要化，供后续迭代对话使用
+    await consoleLog('压缩上下文...')
+    try {
+      const contextSummary = await compressTaskContext(result.result, userRequirement, suggestion)
+      ;(result.result as any).contextSummary = contextSummary
+    } catch (e) {
+      console.error('上下文压缩失败，不影响主流程:', e)
+      ;(result.result as any).contextSummary = ''
+    }
+
     // 用uploadToOSSAndSaveRecord上传图纸
     await consoleLog('生成效果图...')
-    const resultImage = await generateImageBySize(buildDocPrompt(result.result,userRequirement+"\n\r# 修改建议：\n\r"+suggestion,taskImagePrompt?.prompt || ''),'2368*1728') 
+    const imagePrompt=buildDocPrompt(result.result,userRequirement+"\n\r# 修改建议：\n\r"+suggestion,taskImagePrompt?.prompt || '')
+    await consoleLog('生成效果图提示词...')
+    const resultImage = await generateImageBySize(imagePrompt,'2368*1728') 
     //const resultImage = await generateImage('建议：'+suggestion+'\n\r任务：'+taskImagePrompt?.prompt || '')
-    // TODO：转存到oss，返回url，并返回bucket和ossKey，更新outputData
+    // TODO：转存到oss，返回url，并返回bucket和ossKey，更新outputData]
+    await consoleLog('生成效果图成功...')
     if(resultImage){
+      //await consoleLog('生成效果图地址：'+resultImage+'...')
       const ossImage = await uploadToOSSbyUrl(resultImage)
       ;(result.result as any).resultImage = ossImage.ossUrl
       ;(result.result as any).resultImageBucket = ossImage.bucket
       ;(result.result as any).resultImageOssKey = ossImage.ossKey
     }
-    
+    console.log('清理缓存....')
     await consoleLog('清理缓存...')
     const imageObj = await uploadToOSSAndSaveRecord(imagePath)
     // 完成

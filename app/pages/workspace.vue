@@ -20,6 +20,11 @@ const isPolling = ref(false)
 const chatMessages = ref<any[]>([])
 const isSending = ref(false)
 
+// 后续对话状态
+const isFollowUp = ref(false)
+const contextSummary = ref<string>('')
+const previousResultImage = ref<{ bucket: string; ossKey: string } | null>(null)
+
 // 自动滚动 markdown 内容到底部
 async function scrollMarkdownToBottom() {
   // await nextTick()
@@ -102,7 +107,7 @@ function removeFile(index: number) {
 async function pollTaskStatus(taskId: string) {
   isPolling.value = true
   let pollCount = 0
-  const maxPolls = 200 // 最多轮询60次
+  const maxPolls = 300 // 最多轮询60次
 
   while (isPolling.value && pollCount < maxPolls) {
     try {
@@ -123,6 +128,17 @@ async function pollTaskStatus(taskId: string) {
           taskMsg.progress=100
           taskMsg.response = res.task.outputData
           taskMsg.resultData = res.task.outputData
+          // 提取上下文信息，用于后续迭代对话
+          if (res.task.outputData?.contextSummary) {
+            contextSummary.value = res.task.outputData.contextSummary
+            isFollowUp.value = true
+            if (res.task.outputData.resultImageBucket && res.task.outputData.resultImageOssKey) {
+              previousResultImage.value = {
+                bucket: res.task.outputData.resultImageBucket,
+                ossKey: res.task.outputData.resultImageOssKey,
+              }
+            }
+          }
           isPolling.value = false
           break
         }
@@ -155,12 +171,23 @@ async function pollTaskStatus(taskId: string) {
 
 // 发送消息/开始识别任务
 async function sendMessage() {
+  // 后续对话模式：调用迭代接口
+  if (isFollowUp.value && contextSummary.value && currentTask.value?.id) {
+    await sendFollowUp()
+    return
+  }
+
+  // 首次对话模式：需要上传图片
   if (uploadedFiles.value.length === 0) {
     return
   }
 
-  // TODO:清空之前的对话内容
+  // 清空之前的对话内容
   chatMessages.value = []
+  // 重置后续对话状态
+  isFollowUp.value = false
+  contextSummary.value = ''
+  previousResultImage.value = null
 
   isSending.value = true
 
@@ -202,8 +229,8 @@ async function sendMessage() {
       status: 'PENDING',
       progress: 0,
       message: '任务创建中...',
-      response: null,
-      resultData: null,
+      response: null as any,
+      resultData: null as any,
       error: null,
       timestamp: new Date(),
     }
@@ -232,6 +259,97 @@ async function sendMessage() {
       id: Date.now().toString() + '_error',
       type: 'error',
       content: error.message || '消息发送失败，请重试',
+      timestamp: new Date(),
+    })
+  } finally {
+    isSending.value = false
+  }
+}
+
+// 后续对话：基于上下文迭代生成效果图（同步，无需轮询）
+async function sendFollowUp() {
+  if (!message.value?.trim() || isSending.value) return
+
+  isSending.value = true
+
+  try {
+    // 添加用户消息
+    const userMessage = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: message.value,
+      files: [],
+      timestamp: new Date(),
+    }
+    chatMessages.value.push(userMessage)
+
+    const userMsg = message.value
+    message.value = ''
+
+    // 添加 AI 加载占位消息
+    const aiMessage = {
+      id: Date.now().toString() + '_ai',
+      type: 'ai',
+      taskId: currentTask.value?.id || '',
+      status: 'RUNNING',
+      progress: 50,
+      message: '正在生成效果图，请稍候...',
+      response: null as any,
+      resultData: null as any,
+      error: null,
+      timestamp: new Date(),
+    }
+    chatMessages.value.push(aiMessage)
+
+    // 调用迭代接口（同步等待结果）
+    const iterateRes = await $fetch('/api/tasks/iterate', {
+      method: 'POST',
+      body: {
+        taskId: currentTask.value?.id,
+        userMessage: userMsg,
+        contextSummary: contextSummary.value,
+      },
+    }) as any
+
+    // 直接用返回结果更新 AI 消息（通过响应式数组访问，确保触发视图更新）
+    const msgIndex = chatMessages.value.findIndex(m => m.id === aiMessage.id)
+    if (msgIndex !== -1) {
+      chatMessages.value[msgIndex] = {
+        ...chatMessages.value[msgIndex],
+        status: 'COMPLETED',
+        progress: 100,
+        message: '迭代效果图生成完成',
+        response: {
+          resultImage: iterateRes.resultImage,
+          resultImageBucket: iterateRes.resultImageBucket,
+          resultImageOssKey: iterateRes.resultImageOssKey,
+        },
+        resultData: {
+          resultImage: iterateRes.resultImage,
+          resultImageBucket: iterateRes.resultImageBucket,
+          resultImageOssKey: iterateRes.resultImageOssKey,
+        },
+      }
+    }
+
+    // 更新上下文中最新的效果图信息和压缩后的上下文
+    previousResultImage.value = {
+      bucket: iterateRes.resultImageBucket,
+      ossKey: iterateRes.resultImageOssKey,
+    }
+    if (iterateRes.contextSummary) {
+      contextSummary.value = iterateRes.contextSummary
+    }
+
+    // 刷新历史记录
+    await loadHistories()
+
+  } catch (error: any) {
+    console.error('迭代对话失败:', error)
+    chatMessages.value.push({
+      id: Date.now().toString() + '_error',
+      type: 'error',
+      content: error.message || '迭代对话失败，请重试',
       timestamp: new Date(),
     })
   } finally {
@@ -298,6 +416,58 @@ async function loadTaskDetail(taskId: string) {
             timestamp: task.updatedAt,
           }
           chatMessages.value.push(aiMessage)
+
+          // 渲染迭代历史
+          const iterations = task.outputData?.iterations || []
+          for (let i = 0; i < iterations.length; i++) {
+            const iter = iterations[i]
+            // 迭代用户消息
+            chatMessages.value.push({
+              id: Date.now().toString() + '_iter_user_' + i,
+              type: 'user',
+              content: iter.userMessage,
+              files: [],
+              timestamp: iter.createdAt,
+            })
+            // 迭代 AI 消息
+            let iterImageUrl = iter.resultImage
+            if (iter.resultImageBucket && iter.resultImageOssKey) {
+              try {
+                const ossIter = await $fetch(`/api/oss/presigned?bucket=${iter.resultImageBucket}&osskey=${iter.resultImageOssKey}`) as any
+                iterImageUrl = ossIter.url
+              } catch (e) {
+                console.error('获取迭代图片失败:', e)
+              }
+            }
+            chatMessages.value.push({
+              id: Date.now().toString() + '_iter_ai_' + i,
+              type: 'ai',
+              taskId: task.id,
+              status: 'COMPLETED',
+              progress: 100,
+              message: '迭代效果图生成完成',
+              response: { resultImage: iterImageUrl },
+              resultData: { resultImage: iterImageUrl },
+              error: null,
+              timestamp: iter.createdAt,
+            })
+          }
+
+          // 恢复后续对话状态
+          if (task.outputData?.contextSummary) {
+            contextSummary.value = task.outputData.contextSummary
+            isFollowUp.value = true
+            if (task.outputData.resultImageBucket && task.outputData.resultImageOssKey) {
+              previousResultImage.value = {
+                bucket: task.outputData.resultImageBucket,
+                ossKey: task.outputData.resultImageOssKey,
+              }
+            }
+          } else {
+            isFollowUp.value = false
+            contextSummary.value = ''
+            previousResultImage.value = null
+          }
     }
     if(task.status === 'RUNNING'){
       //TODO
@@ -671,11 +841,11 @@ onMounted(() => {
                   v-model="message"
                   type="textarea"
                   :rows="2"
-                  placeholder="添加备注说明（可选）..."
+                  :placeholder="isFollowUp ? '描述你的修改需求，例如：把挂衣区改为叠放区、增加抽屉...' : '上传CAD图片并描述你的需求'"
                   class="message-input"
                 />
                 <div class="input-actions">
-                  <label class="upload-btn">
+                  <label v-if="!isFollowUp" class="upload-btn">
                     <el-icon><Upload /></el-icon>
                     <input
                       type="file"
@@ -684,10 +854,11 @@ onMounted(() => {
                       @change="handleFileUpload"
                     />
                   </label>
+                  <span v-else class="follow-up-hint">基于当前设计迭代</span>
                   <el-button
                     type="success"
                     class="send-btn"
-                    :disabled="uploadedFiles.length === 0 || isSending"
+                    :disabled="isFollowUp ? !(message && message.trim()) || isSending : uploadedFiles.length === 0 || isSending"
                     @click="sendMessage"
                   >
                     <el-icon><Promotion /></el-icon>
@@ -1312,6 +1483,14 @@ onMounted(() => {
 .upload-btn:hover {
   background: #f0f9ff;
   color: #22c55e;
+}
+
+.follow-up-hint {
+  font-size: 12px;
+  color: #22c55e;
+  background: #f0f9ff;
+  padding: 4px 10px;
+  border-radius: 12px;
 }
 
 .file-input {
