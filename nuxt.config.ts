@@ -3,6 +3,11 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
 
+  // Prisma 生成的代码包含 BigInt 字面量，需要 es2020+ 支持
+  esbuild: {
+    target: 'es2020',
+  },
+
   modules: [
     '@element-plus/nuxt',
     '@sidebase/nuxt-auth',
