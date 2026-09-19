@@ -167,6 +167,10 @@ onUnmounted(() => {
 const navigateToWorkspace = () => {
   navigateTo('/workspace')
 }
+
+const navigateToCad = () => {
+  navigateTo('/cad')
+}
 </script>
 
 <template>
@@ -188,6 +192,14 @@ const navigateToWorkspace = () => {
           @click="navigateToWorkspace"
         >
           进入工作台
+          <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+        </el-button>
+        <el-button 
+          size="large" 
+          class="enter-button ghost-button"
+          @click="navigateToCad"
+        >
+          文字建模
           <el-icon class="el-icon--right"><ArrowRight /></el-icon>
         </el-button>
       </div>
@@ -305,5 +317,18 @@ const navigateToWorkspace = () => {
 .enter-button:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 40px rgba(34, 197, 94, 0.5);
+}
+
+.ghost-button {
+  margin-left: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #16a34a;
+  border: 1px solid #22c55e;
+  box-shadow: 0 4px 20px rgba(34, 197, 94, 0.2);
+}
+
+.ghost-button:hover {
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(34, 197, 94, 0.35);
 }
 </style>

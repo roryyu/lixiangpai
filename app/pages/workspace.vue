@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Upload, CircleClose, Promotion, Picture, Check, Close, Delete, Setting } from '@element-plus/icons-vue'
+import { Upload, CircleClose, Promotion, Picture, Check, Close, Delete, Setting, Box, Plus } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { ref, watch, nextTick } from 'vue'
 
@@ -10,6 +10,10 @@ definePageMeta({
 
 const { data: authData, signOut } = useAuth()
 const router = useRouter()
+const workspaceSnapshot = useState<{ dataUrl: string; fileName: string } | null>(
+  'cad-workspace-snapshot',
+  () => null,
+)
 
 const histories = ref<any[]>([])
 const message = ref('')
@@ -98,9 +102,47 @@ function handleFileUpload(event: Event) {
 }
 
 function removeFile(index: number) {
-  URL.revokeObjectURL(previewUrls.value[index])
+  const url = previewUrls.value[index]
+  if (url) URL.revokeObjectURL(url)
   uploadedFiles.value.splice(index, 1)
   previewUrls.value.splice(index, 1)
+}
+
+function startNewChat() {
+  isPolling.value = false
+  currentTask.value = null
+  chatMessages.value = []
+  message.value = ''
+  isFollowUp.value = false
+  contextSummary.value = ''
+  previousResultImage.value = null
+  previewUrls.value.forEach(url => URL.revokeObjectURL(url))
+  uploadedFiles.value = []
+  previewUrls.value = []
+}
+
+function importCadSnapshot() {
+  const snapshot = workspaceSnapshot.value
+  if (!snapshot) return
+  // 消费后立即清除，返回或刷新工作台不会重复导入。
+  workspaceSnapshot.value = null
+  try {
+    const prefix = 'data:image/png;base64,'
+    if (!snapshot.dataUrl.startsWith(prefix)) throw new Error('截图格式无效，请重新截图')
+    const binary = atob(snapshot.dataUrl.slice(prefix.length))
+    if (!binary.length || binary.length > 50 * 1024 * 1024) {
+      throw new Error('截图为空或超过 50MB，请调整画布后重试')
+    }
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+    const file = new File([bytes], snapshot.fileName, { type: 'image/png' })
+    const url = URL.createObjectURL(file)
+    startNewChat()
+    uploadedFiles.value = [file]
+    previewUrls.value = [url]
+    ElMessage.success('截图已添加到新对话，可补充需求后发送')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '截图导入失败，请重新截图')
+  }
 }
 
 // 轮询任务状态
@@ -178,7 +220,8 @@ async function sendMessage() {
   }
 
   // 首次对话模式：需要上传图片
-  if (uploadedFiles.value.length === 0) {
+  const imageFile = uploadedFiles.value[0]
+  if (!imageFile || isSending.value) {
     return
   }
 
@@ -212,7 +255,7 @@ async function sendMessage() {
     chatMessages.value.push(userMessage)
 
     const formData = new FormData()
-    formData.append('image', uploadedFiles.value[0])
+    formData.append('image', imageFile)
     formData.append('name', message.value || '图片识别任务')
 
     // 清空输入
@@ -564,7 +607,13 @@ async function deleteTask(taskId: string) {
 }
 
 onMounted(() => {
+  importCadSnapshot()
   loadHistories()
+})
+
+onBeforeUnmount(() => {
+  isPolling.value = false
+  previewUrls.value.forEach(url => URL.revokeObjectURL(url))
 })
 </script>
 
@@ -578,6 +627,7 @@ onMounted(() => {
           </NuxtLink>
         </div>
         <div class="header-right">
+          <el-button text :icon="Box" @click="router.push('/cad')">文字建模</el-button>
           <el-dropdown v-if="authData?.user?.role === 'ADMIN'" @command="handleMenuCommand">
             <span class="admin-menu">
               <el-icon><Setting /></el-icon>
@@ -601,6 +651,14 @@ onMounted(() => {
         <el-aside width="280px" class="history-aside">
           <div class="history-header">
             <span>历史记录</span>
+            <el-button
+              text
+              type="success"
+              size="small"
+              :icon="Plus"
+              :disabled="isSending || isPolling"
+              @click="startNewChat"
+            >新建对话</el-button>
           </div>
           <div class="history-list">
             <div
@@ -941,6 +999,9 @@ onMounted(() => {
 }
 
 .history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 16px 20px;
   font-size: 16px;
   font-weight: 600;
