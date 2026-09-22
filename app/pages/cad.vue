@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Upload, CircleClose, Promotion, Picture, Check, Close, Back, Box } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import type { CadModel } from '../../shared/types/cad'
 
 definePageMeta({
   middleware: 'auth',
@@ -21,17 +22,27 @@ interface ChatMessage {
   status?: 'RUNNING' | 'COMPLETED' | 'FAILED'
   title?: string
   summary?: string
-  model?: any
+  model?: CadModel
   error?: string
   timestamp: Date
 }
 
 const messages = ref<ChatMessage[]>([])
+const chatScroll = ref<HTMLDivElement | null>(null)
+watch(messages, () => {
+  if (chatScroll.value) chatScroll.value.scrollTop = chatScroll.value.scrollHeight
+}, { deep: true, flush: 'post' })
 const input = ref('')
 const uploadedFile = ref<File | null>(null)
 const previewUrl = ref<string>('')
 const isGenerating = ref(false)
-const currentModel = ref<any>(null)
+const currentModel = ref<CadModel | null>(null)
+const editMode = ref<'generate' | 'material'>('generate')
+const materialExamples = [
+  { label: '胡桃木', text: '整体改为胡桃木，保留自然木纹和哑光质感' },
+  { label: '拉丝金属', text: '整体改为银色拉丝不锈钢，呈现金属反射与细腻拉丝纹理' },
+  { label: '透明玻璃', text: '整体改为透明玻璃，带轻微浅绿色边缘和通透质感' },
+]
 const currentTitle = ref('')
 const currentSummary = ref('')
 const isExporting = ref(false)
@@ -120,6 +131,11 @@ async function sendMessage() {
     return
   }
   if (isGenerating.value) return
+  const sentMode = editMode.value
+  if (sentMode === 'material' && !currentModel.value) {
+    ElMessage.warning('请先生成模型，再调整材质')
+    return
+  }
 
   isGenerating.value = true
 
@@ -128,10 +144,16 @@ async function sendMessage() {
   let imageRaw = ''
   let mediaType = 'image/jpeg'
   if (uploadedFile.value) {
-    const b = await fileToBase64(uploadedFile.value)
-    imageDataUrl = b.dataUrl
-    imageRaw = b.raw
-    mediaType = b.mediaType
+    try {
+      const b = await fileToBase64(uploadedFile.value)
+      imageDataUrl = b.dataUrl
+      imageRaw = b.raw
+      mediaType = b.mediaType
+    } catch {
+      isGenerating.value = false
+      ElMessage.error('图片读取失败，请重新上传')
+      return
+    }
   }
 
   messages.value.push({
@@ -146,7 +168,7 @@ async function sendMessage() {
     id: Date.now() + '_ai',
     type: 'ai',
     status: 'RUNNING',
-    content: '正在生成建模方案…',
+    content: sentMode === 'material' ? '正在解析材质并调整外观，保留模型几何…' : '正在生成几何与材质方案…',
     timestamp: new Date(),
   }
   messages.value.push(aiMsg)
@@ -157,12 +179,14 @@ async function sendMessage() {
   removeFile()
 
   try {
-    const res = await $fetch<{ success: boolean; model: any; title: string; summary: string }>(
+    const res = await $fetch<{ success: boolean; model: CadModel; title: string; summary: string }>(
       '/api/cad/generate',
       {
         method: 'POST',
         body: {
           text: sentText,
+          mode: sentMode,
+          currentModel: sentMode === 'material' ? currentModel.value : undefined,
           imageBase64: imageRaw || undefined,
           mediaType: imageRaw ? mediaType : undefined,
         },
@@ -183,6 +207,7 @@ async function sendMessage() {
     currentModel.value = res.model
     currentTitle.value = res.title
     currentSummary.value = res.summary
+    editMode.value = 'material'
   } catch (e: any) {
     const msg = e?.data?.message || e?.message || '生成失败，请重试'
     const idx = messages.value.findIndex((m) => m.id === aiMsg.id)
@@ -197,6 +222,8 @@ async function sendMessage() {
 }
 
 function clearChat() {
+  if (isGenerating.value) return
+  editMode.value = 'generate'
   messages.value = []
   currentModel.value = null
   currentTitle.value = ''
@@ -221,17 +248,17 @@ function clearChat() {
     <div class="cad-body">
       <!-- 左侧：聊天 -->
       <section class="chat-panel">
-        <div class="chat-scroll">
+        <div ref="chatScroll" class="chat-scroll">
           <div v-if="messages.length === 0" class="welcome">
             <el-icon class="welcome-icon"><Box /></el-icon>
-            <h2>文字 / 图片 → 3D 模型</h2>
-            <p>描述你想要的零件，例如：</p>
+            <h2>文字 / 图片 → 材质 3D 模型</h2>
+            <p>同时描述形状、尺寸与材质，例如：</p>
             <ul class="examples">
-              <li>一块 60×40×8 的铝板，四角各钻一个 φ6 通孔</li>
-              <li>一个底座上加一根竖直圆柱，顶端放一个球</li>
-              <li>法兰盘：圆盘中心打孔，周围均布 6 个小孔</li>
+              <li>一块 60×40×8 的拉丝铝板，四角各钻一个 φ6 通孔</li>
+              <li>胡桃木桌面配银色金属桌腿，木纹沿桌面长边延伸</li>
+              <li>黄铜底座托着一个浅绿色透明玻璃球</li>
             </ul>
-            <p class="tip">也可上传一张参考图，AI 会尝试还原其几何形状。</p>
+            <p class="tip">也可上传参考图。生成后可继续用自然语言修改整体或局部材质，保持模型尺寸不变。</p>
           </div>
 
           <div v-else class="msg-list">
@@ -272,6 +299,23 @@ function clearChat() {
         </div>
 
         <div class="input-area">
+          <div class="mode-row">
+            <el-radio-group v-model="editMode" size="small" :disabled="isGenerating">
+              <el-radio-button value="generate">生成新模型</el-radio-button>
+              <el-radio-button value="material" :disabled="!currentModel">仅改材质</el-radio-button>
+            </el-radio-group>
+            <span v-if="editMode === 'material'" class="mode-tip">保留几何与尺寸</span>
+          </div>
+          <div v-if="editMode === 'material'" class="material-examples">
+            <el-button
+              v-for="example in materialExamples"
+              :key="example.label"
+              size="small"
+              round
+              :disabled="isGenerating"
+              @click="input = example.text"
+            >{{ example.label }}</el-button>
+          </div>
           <div v-if="previewUrl" class="preview-row">
             <div class="preview-item">
               <img :src="previewUrl" />
@@ -284,7 +328,7 @@ function clearChat() {
               type="textarea"
               :rows="2"
               resize="none"
-              placeholder="描述你想生成的 3D 模型…（Enter 发送，Shift+Enter 换行）"
+              :placeholder="editMode === 'material' ? '例如：桌面改成胡桃木，支架改成拉丝金属…' : '描述模型的形状与材质，例如木质底座托着透明玻璃球…'"
               @keydown.enter.exact.prevent="sendMessage"
             />
             <div class="input-actions">
@@ -293,7 +337,7 @@ function clearChat() {
                 <input type="file" accept="image/*" class="file-input" @change="handleFileUpload" />
               </label>
               <div class="right-actions">
-                <el-button v-if="messages.length" text size="small" @click="clearChat">清空</el-button>
+                <el-button v-if="messages.length" text size="small" :disabled="isGenerating" @click="clearChat">清空</el-button>
                 <el-button
                   type="success"
                   class="send-btn"
@@ -545,6 +589,24 @@ function clearChat() {
   border-top: 1px solid #f0f0f0;
   padding: 12px;
   flex-shrink: 0;
+}
+
+.mode-row,
+.material-examples {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mode-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.material-examples .el-button + .el-button {
+  margin-left: 0;
 }
 
 .preview-row {

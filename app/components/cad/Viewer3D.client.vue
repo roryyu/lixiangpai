@@ -11,32 +11,9 @@ import * as THREE from 'three'
 import { Camera, Download } from '@element-plus/icons-vue'
 import { geometryToTriangles, trianglesToDxf } from '../../../shared/utils/cad-export'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { ADDITION, SUBTRACTION, INTERSECTION, Brush, Evaluator } from 'three-bvh-csg'
-import type { CSGOperation } from 'three-bvh-csg'
-
-interface CadTransform {
-  translate?: [number, number, number]
-  rotate?: [number, number, number]
-  scale?: [number, number, number]
-}
-interface CadPrimitive {
-  kind: 'box' | 'cylinder' | 'sphere' | 'cone' | 'torus'
-  size: Record<string, number>
-  transform?: CadTransform
-  color?: string
-}
-interface CadBoolean {
-  kind: 'union' | 'subtract' | 'intersect'
-  children: CadNode[]
-  color?: string
-}
-type CadNode = CadPrimitive | CadBoolean
-interface CadModel {
-  units?: string
-  title?: string
-  summary?: string
-  model: CadNode
-}
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { buildCadMesh, disposeCadMesh } from '../../utils/cad-renderer'
+import type { CadModel } from '../../../shared/types/cad'
 
 const props = defineProps<{ model: CadModel | null; exporting?: boolean }>()
 const emit = defineEmits<{
@@ -59,108 +36,19 @@ let gridHelper: THREE.GridHelper | null = null
 let rafId = 0
 let resizeObserver: ResizeObserver | null = null
 
-const evaluator = new Evaluator()
-const DEFAULT_COLOR = '#22c55e'
+let environmentTarget: THREE.WebGLRenderTarget | null = null
+let lastGeometryKey = ''
 
-function isBoolean(node: CadNode): node is CadBoolean {
-  return node.kind === 'union' || node.kind === 'subtract' || node.kind === 'intersect'
-}
-
-/** 根据图元类型创建 Three.js 几何体（尺寸取自 DSL 的 size 参数） */
-function makePrimitiveGeometry(node: CadPrimitive): THREE.BufferGeometry {
-  const s = node.size || {}
-  switch (node.kind) {
-    case 'box':
-      return new THREE.BoxGeometry(s.w ?? 10, s.h ?? 10, s.d ?? 10)
-    case 'cylinder': {
-      const rt = s.radiusTop ?? s.radius ?? 5
-      const rb = s.radiusBottom ?? s.radius ?? 5
-      return new THREE.CylinderGeometry(rt, rb, s.height ?? 10, 48)
-    }
-    case 'sphere':
-      return new THREE.SphereGeometry(s.radius ?? 5, 48, 32)
-    case 'cone':
-      return new THREE.ConeGeometry(s.radius ?? 5, s.height ?? 10, 48)
-    case 'torus':
-      return new THREE.TorusGeometry(s.radius ?? 6, s.tube ?? 2, 24, 64)
-    default:
-      return new THREE.BoxGeometry(10, 10, 10)
-  }
-}
-
-/** 把 transform（平移/旋转/缩放）烘焙进几何体，使 CSG 在统一空间求值 */
-function applyTransform(geo: THREE.BufferGeometry, t?: CadTransform) {
-  if (!t) return
-  const pos = new THREE.Vector3(...(t.translate ?? [0, 0, 0]))
-  const rot = new THREE.Euler(
-    THREE.MathUtils.degToRad(t.rotate?.[0] ?? 0),
-    THREE.MathUtils.degToRad(t.rotate?.[1] ?? 0),
-    THREE.MathUtils.degToRad(t.rotate?.[2] ?? 0),
-    'XYZ',
-  )
-  const scale = new THREE.Vector3(...(t.scale ?? [1, 1, 1]))
-  const m = new THREE.Matrix4().compose(pos, new THREE.Quaternion().setFromEuler(rot), scale)
-  geo.applyMatrix4(m)
-}
-
-/** 递归把 DSL 节点树求值为一个 Brush（CSG 结果） */
-function buildBrush(node: CadNode, material: THREE.Material): Brush {
-  if (!isBoolean(node)) {
-    const geo = makePrimitiveGeometry(node)
-    applyTransform(geo, node.transform)
-    const brush = new Brush(geo, material)
-    brush.updateMatrixWorld()
-    return brush
-  }
-
-  const children = node.children
-  const first = children?.[0]
-  if (!first) {
-    // 异常兜底：空布尔节点返回一个单位立方体
-    const g = new THREE.BoxGeometry(1, 1, 1)
-    const fb = new Brush(g, material)
-    fb.updateMatrixWorld()
-    return fb
-  }
-  if (children!.length < 2) {
-    return buildBrush(first, material)
-  }
-
-  const opMap: Record<string, CSGOperation> = {
-    union: ADDITION,
-    subtract: SUBTRACTION,
-    intersect: INTERSECTION,
-  }
-  const op = opMap[node.kind] ?? ADDITION
-  let acc = buildBrush(first, material)
-  for (let i = 1; i < children!.length; i++) {
-    const child = children![i]
-    if (!child) continue
-    const b = buildBrush(child, material)
-    acc = evaluator.evaluate(acc, b, op)
-    acc.updateMatrixWorld()
-  }
-  return acc
-}
-
-/** 找到 DSL 树里第一个声明的颜色，作为整体材质色 */
-function pickColor(node: CadNode): string {
-  if (node.color) return node.color
-  if (isBoolean(node)) {
-    for (const c of node.children) {
-      const col = pickColor(c)
-      if (col) return col
-    }
-  }
-  return DEFAULT_COLOR
+// 材质更新保留用户视角，只有几何结构变化才重新取景。
+function geometryKey(model: CadModel): string {
+  return JSON.stringify(model.model, (key, value) => key === 'material' || key === 'color' ? undefined : value)
 }
 
 function clearModel() {
   modelReady.value = false
   if (!modelGroup || !scene) return
-  modelGroup.traverse((obj: any) => {
-    if (obj.geometry) obj.geometry.dispose()
-    if (obj.material) obj.material.dispose()
+  modelGroup.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) disposeCadMesh(obj)
   })
   scene.remove(modelGroup)
   modelGroup = null
@@ -181,8 +69,22 @@ function initScene() {
 
   // 直接绑定模板自带的 canvas，避免 appendChild 时机问题
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl.value, antialias: true })
-  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(w, h, false)
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.1
+
+  // 本地生成摄影棚环境反射，金属与玻璃不依赖远程 HDR 或纹理资源。
+  const room = new RoomEnvironment()
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  try {
+    environmentTarget = pmrem.fromScene(room, 0.04)
+    scene.environment = environmentTarget.texture
+  } finally {
+    room.dispose()
+    pmrem.dispose()
+  }
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
@@ -251,7 +153,7 @@ function fitCameraToObject(object: THREE.Object3D) {
   // 网格地面
   if (gridHelper && scene) {
     scene.remove(gridHelper)
-    gridHelper.geometry.dispose()
+    gridHelper.dispose()
   }
   const gridSize = Math.max(maxDim * 3, 20)
   gridHelper = new THREE.GridHelper(gridSize, 20, 0x334155, 0x1e293b)
@@ -261,28 +163,25 @@ function fitCameraToObject(object: THREE.Object3D) {
 
 function renderModel() {
   if (!scene || !camera || !renderer) return
+  const previousPosition = modelGroup?.position.clone()
   clearModel()
-  if (!props.model) return
+  if (!props.model) {
+    lastGeometryKey = ''
+    return
+  }
 
   try {
-    const color = pickColor(props.model.model)
-    const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(color),
-      metalness: 0.15,
-      roughness: 0.55,
-      side: THREE.DoubleSide,
-    })
-
-    const brush = buildBrush(props.model.model, material)
-    const mesh = new THREE.Mesh(brush.geometry, material)
-
+    const key = geometryKey(props.model)
+    const mesh = buildCadMesh(props.model.model)
     modelGroup = new THREE.Group()
     modelGroup.add(mesh)
     scene.add(modelGroup)
 
-    fitCameraToObject(modelGroup)
+    if (key === lastGeometryKey && previousPosition) modelGroup.position.copy(previousPosition)
+    else fitCameraToObject(modelGroup)
     onResize()
     renderer.render(scene, camera)
+    lastGeometryKey = key
     modelReady.value = true
   } catch (e: any) {
     clearModel()
@@ -365,10 +264,13 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   controls?.dispose()
   clearModel()
-  if (gridHelper) {
-    gridHelper.geometry.dispose()
-    ;(gridHelper.material as THREE.Material).dispose()
-  }
+  gridHelper?.dispose()
+  gridHelper = null
+  scene?.traverse(obj => {
+    if (obj instanceof THREE.AxesHelper) obj.dispose()
+  })
+  environmentTarget?.dispose()
+  environmentTarget = null
   renderer?.dispose()
   renderer = null
   scene = null

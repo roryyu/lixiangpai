@@ -2,6 +2,7 @@
 import { Upload, CircleClose, Promotion, Picture, Check, Close, Delete, Setting, Box, Plus } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { ref, watch, nextTick } from 'vue'
+import type { CadModel } from '../../shared/types/cad'
 
 definePageMeta({
   middleware: 'auth',
@@ -23,6 +24,131 @@ const currentTask = ref<any>(null)
 const isPolling = ref(false)
 const chatMessages = ref<any[]>([])
 const isSending = ref(false)
+
+interface CadPreviewResult {
+  model: CadModel
+  title: string
+  summary: string
+  prompt: string
+}
+
+interface CadSourceMessage {
+  resultData: Record<string, unknown>
+  cadPreview?: CadPreviewResult
+}
+
+const cadAnalysisFields = ['drawing_info', 'elements', 'spaces', 'dimensions', 'annotations', 'summary', 'suggestion'] as const
+const cadDialogVisible = ref(false)
+const cadSourceMessage = ref<CadSourceMessage | null>(null)
+const cadPrompt = ref('')
+const cadPromptExpanded = ref<string[]>([])
+const cadModel = ref<CadModel | null>(null)
+const cadTitle = ref('')
+const cadSummary = ref('')
+const cadError = ref('')
+const isCadGenerating = ref(false)
+const isCadExporting = ref(false)
+let cadRequest: AbortController | null = null
+
+function hasCadAnalysis(result: Record<string, unknown> | null | undefined) {
+  return !!result && cadAnalysisFields.some((key) => {
+    const value = result[key]
+    if (Array.isArray(value)) return value.length > 0
+    if (typeof value === 'string') return !!value.trim()
+    return !!value && typeof value === 'object' && Object.keys(value).length > 0
+  })
+}
+
+function openCadPreview(msg: CadSourceMessage) {
+  if (!hasCadAnalysis(msg.resultData)) return
+  cancelCadGeneration()
+  cadSourceMessage.value = msg
+  const cached = msg.cadPreview
+  // 只传当前消息的分析数据；不包含图片地址、统计信息或其他轮次的结果。
+  const analysis = Object.fromEntries(cadAnalysisFields.map(key => [key, msg.resultData[key]]))
+  cadPrompt.value = cached?.prompt || [
+    '请根据以下图纸分析结果生成带材质的 3D 模型。',
+    '保留已识别的尺寸、空间布局和部件关系，结合修改建议呈现效果。',
+    '缺失尺寸可合理估算，并在摘要中说明；不要把分析文字或尺寸标注建成实体。',
+    JSON.stringify(analysis),
+  ].join('\n')
+  cadModel.value = cached?.model || null
+  cadTitle.value = cached?.title || ''
+  cadSummary.value = cached?.summary || ''
+  cadError.value = ''
+  cadPromptExpanded.value = []
+  cadDialogVisible.value = true
+  if (!cached) void generateCadPreview()
+}
+
+async function generateCadPreview() {
+  const source = cadSourceMessage.value
+  if (!source || isCadGenerating.value) return
+  const text = cadPrompt.value.trim()
+  // 与 /api/cad/generate 的文本上限一致，不静默截断尺寸和结构数据。
+  if (!text) {
+    cadError.value = '请输入分析内容'
+    cadPromptExpanded.value = ['analysis']
+    return
+  }
+  const controller = new AbortController()
+  cadRequest = controller
+  isCadGenerating.value = true
+  cadError.value = ''
+  try {
+    const res = await $fetch<{ success: boolean; model: CadModel; title: string; summary: string; normalizedText?: string }>(
+      '/api/cad/generate',
+      { method: 'POST', body: { text, mode: 'generate', autoCompact: true }, signal: controller.signal, retry: 0 },
+    )
+    // 关闭弹窗或切换结果后，旧请求不得覆盖新的预览。
+    if (cadRequest !== controller) return
+    if (!res.success || !res.model) throw new Error('未返回有效的 3D 模型，请重试')
+    cadModel.value = res.model
+    cadTitle.value = res.title
+    cadSummary.value = res.summary
+    cadPrompt.value = res.normalizedText || text
+    source.cadPreview = { model: res.model, title: res.title, summary: res.summary, prompt: cadPrompt.value }
+  } catch (error: any) {
+    if (cadRequest !== controller) return
+    cadError.value = error?.data?.message || error?.message || '3D 效果图生成失败，请重试'
+  } finally {
+    if (cadRequest === controller) {
+      cadRequest = null
+      isCadGenerating.value = false
+    }
+  }
+}
+
+function cancelCadGeneration() {
+  cadRequest?.abort()
+  cadRequest = null
+  isCadGenerating.value = false
+}
+
+function onCadViewerError(error: string) {
+  ElMessage({ type: 'error', message: error, duration: 10_000, showClose: true })
+}
+
+function importPreviewSnapshot(dataUrl: string) {
+  if (isCadExporting.value) return
+  if (isSending.value || isPolling.value) {
+    ElMessage.warning('请等待当前任务完成后再将截图添加到新对话')
+    return
+  }
+  isCadExporting.value = true
+  try {
+    const name = (cadTitle.value || '3D模型').replace(/[\\/:*?"<>|]/g, '-').slice(0, 80)
+    workspaceSnapshot.value = { dataUrl, fileName: `${name}-${Date.now()}.png` }
+    cadDialogVisible.value = false
+    importCadSnapshot()
+  } finally {
+    isCadExporting.value = false
+  }
+}
+
+watch(cadDialogVisible, visible => {
+  if (!visible) cancelCadGeneration()
+}, { flush: 'sync' })
 
 // 后续对话状态
 const isFollowUp = ref(false)
@@ -612,6 +738,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  cancelCadGeneration()
   isPolling.value = false
   previewUrls.value.forEach(url => URL.revokeObjectURL(url))
 })
@@ -760,6 +887,14 @@ onBeforeUnmount(() => {
                         <div class="result-header">
                           <el-icon color="#67c23a"><Check /></el-icon>
                           <span>识别完成</span>
+                          <el-button
+                            v-if="hasCadAnalysis(msg.resultData)"
+                            type="success"
+                            plain
+                            size="small"
+                            :icon="Box"
+                            @click="openCadPreview(msg)"
+                          >生成3D效果图</el-button>
                         </div>
 
                         <!-- 图纸信息 -->
@@ -928,6 +1063,58 @@ onBeforeUnmount(() => {
         </el-main>
       </el-container>
     </el-container>
+
+    <el-dialog
+      v-model="cadDialogVisible"
+      :title="cadTitle ? `3D效果图 · ${cadTitle}` : '生成3D效果图'"
+      width="min(1100px, 94vw)"
+      top="5vh"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+    >
+      <div class="cad-dialog-content">
+        <el-collapse v-model="cadPromptExpanded">
+          <el-collapse-item name="analysis" title="查看 / 调整分析内容">
+            <el-input
+              v-model="cadPrompt"
+              type="textarea"
+              :rows="5"
+              resize="vertical"
+              :disabled="isCadGenerating"
+              aria-label="3D 建模分析内容"
+            />
+            <div class="cad-dialog-hint">{{ cadPrompt.length }} 字，超过 12000 字将自动调用大模型精简后生成，无需手动删减。</div>
+          </el-collapse-item>
+        </el-collapse>
+        <el-alert v-if="cadError" :title="cadError" type="error" :closable="false" show-icon />
+        <div
+          v-loading="isCadGenerating"
+          :element-loading-text="cadPrompt.trim().length > 12000 ? '分析内容较长，正在自动精简并生成 3D 效果图…' : '正在根据分析结果生成几何与材质方案…'"
+          class="cad-dialog-canvas"
+        >
+          <CadViewer3D
+            v-if="cadDialogVisible && cadModel"
+            :model="cadModel"
+            :exporting="isCadExporting || isCadGenerating"
+            @snapshot="importPreviewSnapshot"
+            @error="onCadViewerError"
+          />
+          <div v-else class="cad-dialog-placeholder">
+            <el-icon><Box /></el-icon>
+            <span>{{ cadError ? '生成失败，请点击下方按钮重试' : '3D 效果图将在这里显示' }}</span>
+          </div>
+        </div>
+        <p v-if="cadSummary" class="cad-dialog-summary">{{ cadSummary }}</p>
+        <div class="cad-dialog-hint">拖拽旋转、滚轮缩放；支持保存 DXF 或截图到工作台新对话。</div>
+      </div>
+      <template #footer>
+        <el-button @click="cadDialogVisible = false">关闭</el-button>
+        <el-button type="success" :loading="isCadGenerating" @click="generateCadPreview">
+          {{ isCadGenerating ? '生成中…' : cadModel ? '重新生成' : '重试生成' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1251,9 +1438,57 @@ onBeforeUnmount(() => {
   color: #303133;
 }
 
+.cad-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+.cad-dialog-canvas {
+  position: relative;
+  height: 50vh;
+  min-height: 300px;
+  flex-shrink: 0;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--el-fill-color-light);
+}
+
+.cad-dialog-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.cad-dialog-placeholder .el-icon {
+  font-size: 48px;
+}
+
+.cad-dialog-summary {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--el-text-color-regular);
+}
+
+.cad-dialog-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
 .result-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   font-size: 16px;
   font-weight: 600;
